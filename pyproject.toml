@@ -1,0 +1,39 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "alephllm-diffusion-experiments"
+version = "0.1.0"
+description = "Diffusion experiments for AlephLLM models: Beatrix's text states as conditioning for the Anima image model, her trained arm groups mounted, and the picture tests that read the result."
+readme = "README.md"
+requires-python = ">=3.12"
+license = { text = "Apache-2.0" }   # the code; the model weights carry their own licences (see README)
+authors = [{ name = "AbstractPhil" }]
+keywords = ["alephllm", "beatrix", "anima", "diffusion", "conditioning", "adapters"]
+
+# Compatible ranges for the package itself. The exact, tested environment is requirements.txt.
+# torch is deliberately absent: it comes from PyTorch's CUDA wheel index (requirements.txt), never from PyPI.
+dependencies = [
+    "geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@4da43e75e002670e659126f838225d6795fb4308",
+    "amoe-lora @ git+https://github.com/AbstractEyes/amoe-lora@9e95a0a4d402405b83daba2819350073ca2ae3ca",
+    "geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@98954d8d90b37bbb80d21a06ed0bef16d454b0a5",
+    "transformers>=4.57,<5",
+    "huggingface_hub>=0.36,<1",
+    "diffusers>=0.35",
+    "safetensors>=0.8",
+    "numpy>=2.5",
+    "psutil>=7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=9"]
+
+[project.urls]
+Homepage = "https://github.com/AbstractEyes/alephllm-diffusion-experiments"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

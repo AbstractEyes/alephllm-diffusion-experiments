@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+
+# environments and editors
+.venv/
+venv/
+env/
+.idea/
+.vscode/
+
+# run outputs and caches (data lives on the Hugging Face hub, never in this repo)
+runs/
+outputs/
+cache/
+*.safetensors
+*.pt
+*.ckpt
+*.tar.gz

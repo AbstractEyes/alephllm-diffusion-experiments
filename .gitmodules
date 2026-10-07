@@ -1,0 +1,3 @@
+[submodule "external/diffusion-pipe"]
+	path = external/diffusion-pipe
+	url = https://github.com/AbstractEyes/diffusion-pipe
