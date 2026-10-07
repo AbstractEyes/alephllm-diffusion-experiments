@@ -1,0 +1,4 @@
+{
+ "frozen": "2026-10-04 22:17 (local): the matched-span grid's definitions, frozen before the full-scale rehearsal on step 230,415 and the read of record on step 245,674 (research-notes commit 4456b01)",
+ "tools_changed_since": "stage 1 and stage 2 (s0 unchanged): 786 lines added, 63 removed in the research notes between the freeze and 2026-10-06, each change an execution change listed in stage 2's EXECUTION_CHANGES (resource gates, per-cell files and restarts, card selections, the arm-mount and frame options, the export); moved into github AbstractEyes/alephllm-diffusion-experiments on 2026-10-06 with imports and paths only"
+}

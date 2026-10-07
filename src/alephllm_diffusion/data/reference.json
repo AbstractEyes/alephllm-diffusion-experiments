@@ -1,0 +1,42 @@
+{
+ "repo": "AbstractPhil/beatrix-diffusion-colab",
+ "folder": "reference",
+ "files": {
+  "s0.pt": {
+   "bytes": 5257469,
+   "sha256": "c0a1c49b6d1da176d5c2f90097e4e733f3dc73796f9bc1cf288c8e50b1eee69a"
+  },
+  "s1_step212000_limit80.pt": {
+   "bytes": 44436669,
+   "sha256": "dc5760868b048624a775bfe290ee2f6ce98faee091e8490ce1a2550dd62dff6d"
+  },
+  "s1_random0_limit80.pt": {
+   "bytes": 44436633,
+   "sha256": "b7d3f67d96e099dcc56ad6016b515515d32d20c2ede490b05df05dd0464915b1"
+  },
+  "s1_random1_limit80.pt": {
+   "bytes": 44436633,
+   "sha256": "866d9e2f9724779a2d04d0a46602a117f236655e147ad4e4d2fe4290ff253712"
+  },
+  "logit_scale.json": {
+   "bytes": 17158,
+   "sha256": "1b08dd09f9bc4232e7e9851207a02ecd39a8a96c2d72373333374cdcbb3f2ef4"
+  },
+  "stitch_shakedown.json": {
+   "bytes": 221472,
+   "sha256": "52b61d0f306769ccb9f0aa7d3aa44b39af127dd8e7b30b383304085a891a35b0"
+  },
+  "port_gate_reference.json": {
+   "bytes": 190236,
+   "sha256": "aa074c148800ca2814b82cdc694876d7c0495fe6f033641ab1486f72bfacbe23"
+  },
+  "coco_caps_2x2048.json": {
+   "bytes": 476018,
+   "sha256": "09f511dce4165afe850ae3340ab378230dbfd61be8e8794c2084c8bc32fdd2de"
+  },
+  "refs_2x2048.pt": {
+   "bytes": 92277637,
+   "sha256": "78106e03aa6c68f4ea88cd3585036333fba0add3ae1a0fea7289ea332bd43d29"
+  }
+ }
+}

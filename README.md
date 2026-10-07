@@ -58,11 +58,45 @@ pytest                                     # the same checks as tests
 
 The check exits with code 1 when anything differs from the pins.
 
-## Status
+## Running the experiment
 
-The experiment code moves in next: the grid that maps Beatrix's states into Anima's conditioning space, the arm-mount checks
-and reads, and the export the picture runs consume. A short Colab notebook follows, installing this package and running one
-session per call.
+The experiment runs in three sessions on one card. On Colab, open
+[`notebooks/colab_sessions.ipynb`](notebooks/colab_sessions.ipynb)
+([open it in Colab](https://colab.research.google.com/github/AbstractEyes/alephllm-diffusion-experiments/blob/v0.2.0/notebooks/colab_sessions.ipynb)):
+cell 1 installs this package, cell 2 runs a session, and cell 3 shows what is done. Anywhere else, after the install above:
+
+```python
+from alephllm_diffusion import sessions
+sessions.run(1)        # then 2, then 3; running a session again skips the steps already done
+sessions.status()
+```
+
+| session | steps | about (RTX PRO 6000) |
+|---|---|---|
+| 1 | the mount checks, the mount read, the port check, the restart test, stage 1 of the grid, the picture test's stage A | 2.5-3 h |
+| 2 | the grid of record, the pick, the mount grids and their contrast, the export, publishing the grids | 4-7 h |
+| 3 | the picture test's stage B | 1-1.5 h |
+
+Each step runs as its own process and keeps its full output in `runs/logs/`. The fixed reference inputs (stage 0's captions,
+the reference run's cell lines, the caption draws and their ruler embeddings) come from a private data repository and are
+checked against the SHA-256 recorded in `alephllm_diffusion/data/reference.json`; the session files go to the same repository,
+so a session can continue on another machine. `sessions.run(1, smoke=True, store=False)` rehearses the runner on 80 captions in
+a scratch workspace (`ALEPHLLM_DIFFUSION_HOME`), without the pictures or any upload.
+
+## What is inside
+
+| module | what it does |
+|---|---|
+| `alephllm_diffusion.beatrix.extract` | Beatrix's hidden states for a list of captions, at any of her 32 blocks |
+| `alephllm_diffusion.beatrix.gauges` | the conditioning gauges (debiased CKA, Procrustes, ridge fits, effective rank) |
+| `alephllm_diffusion.mount.gates` | the exact checks of the arm mount, run before any read |
+| `alephllm_diffusion.mount.read` | what the mounted arm groups change in Beatrix's caption states |
+| `alephllm_diffusion.stitch.s0` ... `s2` | the grid: caption token maps, Beatrix's states, and the cells that map them into Anima's text space |
+| `alephllm_diffusion.stitch.pick`, `mounts`, `export` | the pick, the mount contrast, and the export the picture runs read |
+| `alephllm_diffusion.stitch.port_gate`, `resume_test` | the port check against the reference run and the restart test |
+| `alephllm_diffusion.stitch.ship` | publishes a grid to the public data repository (scrubbed of local details) |
+| `alephllm_diffusion.sessions` | the session runner |
+| `alephllm_diffusion.settings`, `storage`, `models` | where files live, the private data store, the public model downloads |
 
 ## Licences
 
