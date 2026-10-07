@@ -27,6 +27,18 @@ def test_the_hub_sliders_name_their_readings_and_arms():
     assert ax.HUB_READ_ID[:4] == "e030" and ax.HUB_READ_ID not in sessions.SLIDER_ARMS
 
 
+def test_only_the_first_three_sessions_need_the_reference_data(monkeypatch):
+    from alephllm_diffusion import storage
+    s = object.__new__(sessions._Session)                 # no card, no workspace: only what reference() reads
+    s.store, s.tok, s.say = False, None, lambda *a: None
+    monkeypatch.setattr(storage, "missing_reference", lambda: ["s0.pt"])
+    monkeypatch.setattr(storage, "check_reference", lambda: pytest.fail("session 4 checked the reference data"))
+    s.reference(4)                                        # the hub sliders start without sessions 1-3's inputs
+    for n in sessions.REFERENCE_SESSIONS:
+        with pytest.raises(sessions.StepFailed, match="reference data missing"):
+            s.reference(n)
+
+
 def test_stage1_file_names_follow_the_stage1_program():
     f = sessions.stage1_file
     assert f("245674") == "s1_step245674.pt"

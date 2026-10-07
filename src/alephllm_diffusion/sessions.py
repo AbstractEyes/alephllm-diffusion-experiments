@@ -46,6 +46,7 @@ E029_META = "experiments/e029_anima_relay_in_pictures/meta.json"
 # nine arms mounted (the hub read, experiment e030, decided the stream's reading and measured the other two; the arms run in
 # this order)
 HUB_READINGS = ("close/stream/18", "close/hub/22", "close/both/18")
+REFERENCE_SESSIONS = (1, 2, 3)        # the sessions that read the fixed reference data; session 4 builds its own inputs
 SLIDER_ARMS = ("e031_beatrix_stream_closing_slider", "e032_beatrix_random_trunk_stream_closing_slider",
                "e033_beatrix_stream_closing_slider_nine_arms", "e034_beatrix_hub_slider", "e035_beatrix_random_trunk_hub_slider",
                "e036_beatrix_hub_and_stream_slider", "e037_beatrix_random_trunk_hub_and_stream_slider")
@@ -509,7 +510,7 @@ class _Session:
 
     # ------------------------------------------------------------------ the session
     def start(self, session: int, steps: list) -> None:
-        from . import models, storage
+        from . import models
         size = ("a smoke run at small scale" if self.smoke
                 else f"about {_dur(60 * sum(s.minutes for s in steps))}")
         print(f"[{_clock()}] SESSION {session} on {self.card}: {len(steps)} steps, {size}; workspace {settings.HOME}; "
@@ -538,6 +539,16 @@ class _Session:
         if self.store:
             self.token()
             self.restore(RESTORE[session])
+        self.reference(session)
+        models.fetch(judge=not self.smoke, say=self.say)
+
+    def reference(self, session: int) -> None:
+        """The fixed reference inputs of the sessions that read them (REFERENCE_SESSIONS): fetched from the data store, or
+        required on disk when it is off, and checked against their recorded SHA-256. Session 4 reads none."""
+        if session not in REFERENCE_SESSIONS:
+            return
+        from . import storage
+        if self.store:
             storage.fetch_reference(tok=self.tok, say=self.say)
         elif storage.missing_reference():
             raise StepFailed(f"reference data missing and the data store is off: {storage.missing_reference()}")
@@ -545,7 +556,6 @@ class _Session:
         if bad:
             raise StepFailed(f"reference files on disk differ from their recorded SHA-256: {bad} (delete them; the next start "
                              "fetches them again)")
-        models.fetch(judge=not self.smoke, say=self.say)
 
     def finish(self, session: int) -> None:
         if self.store:
