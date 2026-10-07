@@ -41,6 +41,14 @@ SMOKE_LIMIT = 80                      # a smoke run's stage 1: the first 80 fit 
 BEAT_S = 300                          # seconds between progress lines
 EXPERIMENTS_REPO = "AbstractPhil/geolip-beatrix-anima"            # where the picture test publishes its results
 E029_META = "experiments/e029_anima_relay_in_pictures/meta.json"
+# session 4, the hub sliders: Beatrix's three readings of a phrase (her stream at the closing stop, block 18; her hub's blackboard
+# at block 22; both together, block 18), each as a slider arm on her bare trunk and an untrained copy, the stream also with the
+# nine arms mounted (the hub read, experiment e030, decided the stream's reading and measured the other two; the arms run in
+# this order)
+HUB_READINGS = ("close/stream/18", "close/hub/22", "close/both/18")
+SLIDER_ARMS = ("e031_beatrix_stream_closing_slider", "e032_beatrix_random_trunk_stream_closing_slider",
+               "e033_beatrix_stream_closing_slider_nine_arms", "e034_beatrix_hub_slider", "e035_beatrix_random_trunk_hub_slider",
+               "e036_beatrix_hub_and_stream_slider", "e037_beatrix_random_trunk_hub_and_stream_slider")
 
 
 class StepFailed(RuntimeError):
@@ -78,11 +86,16 @@ STEPS = (
     Step("publish_grids", 2, "the grids to the public data repo (scrubbed copies)", 5, smoke=False),
     Step("pictures_b", 3, "the picture test, stage B: about 900 pictures, Beatrix's relay beside the arm-mounted relays", 75,
          smoke=False),
+    Step("hub_features", 4, "Beatrix's slider features: three readings of the 74 mood phrases (her stream at the closing stop, "
+                            "her hub, both) on her bare trunk, with the nine arms and untrained; to the public data repo", 10),
+    Step("hub_sliders", 4, "the slider arms: seven pushes trained by Anima's own objective and judged on the held-out scenes "
+                           "(about 1,600 pictures; the render batch timed first)", 140, smoke=False),
 )
 RESTORE = {                           # fetched at a session's start when missing (globs relative to the workspace)
     1: ["markers/*.json", "reports/*", "mount_read/*", "out/s1_*.pt"],
     2: ["markers/*.json", "reports/*", "mount_read/*", "out/s1_*.pt", "out/stitch_*.json", "out/stitch_*_percaption.pt"],
     3: ["markers/*.json", "reports/*", "out/e029_export_*"],
+    4: ["markers/*.json", "reports/*"],
 }
 SAVE = {                              # sent to the data store at a session's end
     1: ["markers/*.json", "logs/*", "reports/*", "reports/env/*", "mount_read/*", "out/s1_*.pt",
@@ -90,6 +103,7 @@ SAVE = {                              # sent to the data store at a session's en
     2: ["markers/*.json", "logs/*", "reports/*", "out/stitch_*.json", "out/stitch_*_percaption.pt", "out/stitch_*_cells_*/*",
         "out/e029_export_*"],
     3: ["markers/*.json", "logs/*", "reports/*"],
+    4: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
 }
 GRID_FILES = ["out/stitch_*_cells_*/*", "out/stitch_*.json", "out/stitch_*_percaption.pt", "logs/*.log"]
 CHECKPOINT = {"stage1": ["out/s1_*.pt", "logs/*.log"], "grid_record": GRID_FILES, "grid_mounts": GRID_FILES}
@@ -477,6 +491,22 @@ class _Session:
         self.pictures("B", "--export", export)
         self.mark("pictures_b", form=form, export=os.path.basename(export))
 
+    def do_hub_features(self):
+        args = [",".join(HUB_READINGS)] + ([] if self.smoke else ["--upload=1"])
+        self.sh("hub_features", "alephllm_diffusion.hubs.features", *args, env={"HF_TOKEN": "" if self.smoke else self.token()})
+        files = [f"mood_phrases_{r.replace('/', '-')}_mini-beatrix-3_step{STEP}.safetensors" for r in HUB_READINGS]
+        missing = [f for f in files if not os.path.exists(os.path.join(settings.OUT_DIR, f))]
+        if missing:
+            raise StepFailed(f"the features step wrote no {missing} (logs/hub_features.log)")
+        self.mark("hub_features", files=files, uploaded=not self.smoke)
+
+    def do_hub_sliders(self):
+        env = {"HF_TOKEN": self.token(), "HF_HOME": os.path.join(settings.ANIMA_DATA, "hf_cache"),
+               "ANIMA_DIFFUSION_PIPE": settings.DP, "OMP_NUM_THREADS": "8"}
+        self.sh("hub_sliders", "geolip_anima_trainer.connectors_run", "--arms", ",".join(SLIDER_ARMS), "--data-root",
+                settings.ANIMA_DATA, "--models-dir", settings.MODELS_DIR, "--eval-batch", "auto", env=env)
+        self.mark("hub_sliders", arms=list(SLIDER_ARMS))
+
     # ------------------------------------------------------------------ the session
     def start(self, session: int, steps: list) -> None:
         from . import models, storage
@@ -529,12 +559,12 @@ def _session_steps(session: int) -> list:
 
 def run(session: int, smoke: bool = False, store: bool | None = None, card_fraction: float | None = None,
         ram_gb: float | None = None, card_free_mib: int = 2000, verbose: bool = False) -> bool:
-    """Run session 1, 2 or 3: every step not yet done, in order; True when the session completes. store: the private data store
+    """Run session 1, 2, 3 or 4: every step not yet done, in order; True when the session completes. store: the private data store
     (default: on, off in a smoke run). card_fraction / ram_gb: the card's per-process memory fraction and the grid's host-memory
     budget (defaults from the machine). card_free_mib: a step starts only while the card holds at most this much (one card, one
     job). verbose: every output line of every step."""
     steps = _session_steps(session)
-    assert steps, f"there is no session {session} (1, 2 or 3)"
+    assert steps, f"there is no session {session} (1, 2, 3 or 4)"
     s = _Session(smoke, (not smoke) if store is None else store, card_fraction, ram_gb, card_free_mib, verbose)
     t_all = time.time()
     try:
@@ -573,7 +603,7 @@ def run(session: int, smoke: bool = False, store: bool | None = None, card_fract
 
 
 def status(smoke: bool = False, fetch: bool = False) -> None:
-    """Every step of the three sessions: done (when, on which card) or not yet. fetch: first fetch the markers of sessions run
+    """Every step of the four sessions: done (when, on which card) or not yet. fetch: first fetch the markers of sessions run
     on other machines from the data store."""
     if fetch:
         from . import storage
@@ -652,3 +682,11 @@ def summary(session: int, smoke: bool = False) -> None:
         print(f"the export: {[f for f in ex if f.endswith('.safetensors')]}")
     elif session == 3:
         print(f"the pictures and their reads: {EXPERIMENTS_REPO}, {os.path.dirname(E029_META)}")
+    elif session == 4:
+        for arm in SLIDER_ARMS:
+            m = load(settings.ANIMA_DATA, "experiments", arm, "result.json")
+            if m and m.get("reads"):
+                r = m["reads"]
+                print(f"{arm.split('_')[0]}: {r.get('TRAINED')}; {r.get('HELD_OUT', '')}; {r.get('NEUTRAL', '')} (held-out "
+                      f"effect {r.get('heldout_effect', float('nan')):+.3f})")
+        print(f"the pictures and their reads: {EXPERIMENTS_REPO}, experiments/{SLIDER_ARMS[0][:4]}-{SLIDER_ARMS[-1][:4]}")

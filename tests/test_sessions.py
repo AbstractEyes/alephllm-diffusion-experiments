@@ -11,7 +11,20 @@ from alephllm_diffusion import sessions, settings, storage
 def test_every_step_has_its_function():
     for st in sessions.STEPS:
         assert callable(getattr(sessions._Session, f"do_{st.name}", None)), st.name
-    assert {st.session for st in sessions.STEPS} == {1, 2, 3}
+    assert {st.session for st in sessions.STEPS} == {1, 2, 3, 4}
+    assert set(sessions.RESTORE) == set(sessions.SAVE) == {1, 2, 3, 4}
+
+
+def test_the_hub_sliders_name_their_readings_and_arms():
+    from alephllm_diffusion.hubs import features
+    for r in sessions.HUB_READINGS:
+        features.parse(r)                                  # every reading is one the features file can be built for
+    from geolip_anima_trainer import anima_experiments as ax
+    hub = [a for a in ax.CONNECTOR_ARMS if a.features in ax.HUB_FEATURES.values()]
+    assert list(sessions.SLIDER_ARMS) == [a.id for a in hub]           # the trainer's hub arms, in its run order
+    assert set(sessions.HUB_READINGS) == set(ax.HUB_FEATURES)            # the files session 4 builds are the ones they read
+    assert [a[:4] for a in sessions.SLIDER_ARMS] == [f"e03{i}" for i in range(1, 8)]
+    assert ax.HUB_READ_ID[:4] == "e030" and ax.HUB_READ_ID not in sessions.SLIDER_ARMS
 
 
 def test_stage1_file_names_follow_the_stage1_program():

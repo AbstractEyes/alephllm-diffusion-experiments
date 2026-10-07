@@ -62,7 +62,7 @@ deepspeed==0.18.4 ; sys_platform == "linux"               # multi-card picture r
 # --- the AlephLLM libraries, pinned by commit
 geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@4da43e75e002670e659126f838225d6795fb4308
 amoe-lora @ git+https://github.com/AbstractEyes/amoe-lora@9e95a0a4d402405b83daba2819350073ca2ae3ca
-geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@98954d8d90b37bbb80d21a06ed0bef16d454b0a5
+geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@40e7b04ff1ac03d405673ec45464c880eff7fdaf
 
 # --- tests
 pytest==9.1.1

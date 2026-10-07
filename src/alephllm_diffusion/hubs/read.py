@@ -64,10 +64,11 @@ import time
 import torch
 import torch.nn.functional as F
 
-from .. import settings
+from .. import __version__, settings
 from ..beatrix import extract as bx
 from ..beatrix import gauges as G
 from ..mount import read as MR
+from ..paths import git_commit, repo_root
 
 STEP, ANCHOR_STEP = 245674, 212000
 SWEEP = [8, 12, 14, 16, 18, 20, 21, 22, 24, 28]               # part A's blocks
@@ -516,7 +517,8 @@ def main(smoke=False, groups=("gCA", "gCB")):
     L = {"_meta": {"step": STEP, "anchor_step": ANCHOR_STEP, "sweep": blocks_a, "blocks_b": blocks_b, "n_captions": n,
                    "groups": list(groups), "refs": draws["draw1"][1].names, "ridge_refs": list(RIDGE_REFS),
                    "record_blocks": list(RECORD_BLOCKS), "prefix": prefix, "frame": FORMS["frame"], "smoke": smoke,
-                   "made": time.strftime("%Y-%m-%d %H:%M:%S %Z")}, "A": {}, "B": {}}
+                   "made": time.strftime("%Y-%m-%d %H:%M:%S %Z"), "package": __version__,
+                   "commit": git_commit(repo_root()) if repo_root() else None}, "A": {}, "B": {}}
 
     def save():
         with open(path, "w", encoding="utf-8") as fh:
@@ -585,6 +587,7 @@ def main(smoke=False, groups=("gCA", "gCB")):
     L["A"]["U0"] = part_a(model, dev, caps1, R1, True, pp, blocks_a, "U0")
     L["B"]["U0"], keepu0 = part_b(model, dev, prefix, blocks_b)
     del model
+    L["_meta"].update(seconds=round(time.time() - T0), finished_utc=time.strftime("%Y-%m-%d %H:%M", time.gmtime()))
     save()
     tick("U0")
     L["decision"] = decide(L["B"]["M0"], L["A"]["M0"])           # the decision and the tables first: nothing after them can
