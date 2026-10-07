@@ -406,11 +406,27 @@ def part_b(model, dev, prefix, blocks=None, forms=("last", "close", "frame"), re
 
 
 # ---------------------------------------------------------------------------- the anchor and the decision
+def stored_features_path():
+    """The stored slider features file: the hub cache's current snapshot or download, else any cached snapshot that holds it
+    (offline, the cache's main pointer can name a newer snapshot without this file)."""
+    from huggingface_hub import hf_hub_download, scan_cache_dir
+    try:
+        return hf_hub_download(FEATURES_REPO, FEATURES_FILE, repo_type="dataset", token=False)
+    except Exception:  # noqa: BLE001 - offline or unreachable: look through every cached snapshot
+        for repo in scan_cache_dir().repos:
+            if repo.repo_id == FEATURES_REPO and repo.repo_type == "dataset":
+                for rev in repo.revisions:
+                    for f in rev.files:
+                        if f.file_name == os.path.basename(FEATURES_FILE) and str(f.file_path).replace("\\", "/").endswith(
+                                FEATURES_FILE):
+                            return str(f.file_path)
+        raise
+
+
 def anchor(keep212, keep_u0):
     """the stored features file (both trunks) against this run's 'last' stream features of the same trunks."""
-    from huggingface_hub import hf_hub_download
     from safetensors import safe_open
-    path = hf_hub_download(FEATURES_REPO, FEATURES_FILE, repo_type="dataset", token=False)
+    path = stored_features_path()
     with safe_open(path, framework="pt") as f:
         phrases = json.loads(f.metadata()["phrases"])
         stored = {k: f.get_tensor(k).float() for k in ("trained", "random")}
@@ -571,15 +587,19 @@ def main(smoke=False, groups=("gCA", "gCB")):
     del model
     save()
     tick("U0")
-    if all(b in blocks_b for b in RECORD_BLOCKS):
-        L["anchor"] = anchor(keep212.get("stream_last_rec"), keepu0.get("stream_last_rec"))
-        say(f"THE ANCHOR (the stored slider features against this run's): {L['anchor']}")
-    L["decision"] = decide(L["B"]["M0"], L["A"]["M0"])
-    save()
-    md = report(L)
-    with open(path[:-5] + ".md", "w", encoding="utf-8") as fh:
-        fh.write(md)
+    L["decision"] = decide(L["B"]["M0"], L["A"]["M0"])           # the decision and the tables first: nothing after them can
+    save()                                                        # cost the run its ending
     say(f"THE DECISION: {L['decision']['verdict']}; chosen {L['decision']['chosen'] and L['decision']['chosen']['key']}")
+    if all(b in blocks_b for b in RECORD_BLOCKS):
+        try:
+            L["anchor"] = anchor(keep212.get("stream_last_rec"), keepu0.get("stream_last_rec"))
+            say(f"THE ANCHOR (the stored slider features against this run's): {L['anchor']}")
+        except Exception as e:  # noqa: BLE001 - the anchor is a check beside the read, recorded either way
+            L["anchor_error"] = f"{type(e).__name__}: {str(e)[:300]}"
+            say(f"THE ANCHOR WAS NOT READ: {L['anchor_error']}")
+        save()
+    with open(path[:-5] + ".md", "w", encoding="utf-8") as fh:
+        fh.write(report(L))
     say(f"wrote {path} and the tables beside it")
     return L
 
@@ -674,6 +694,13 @@ def report(L):
         out += ["## The anchor", "", "| trunk | largest difference | relative to the largest stored value |", "|---|---|---|"]
         out += [f"| {k} | {v['max_abs']:.2e} | {v['max_rel']:.2e} |" for k, v in L["anchor"].items()]
         out.append("")
+    elif L.get("anchor_error"):
+        out += ["## The anchor", "", f"Not read in this run: {L['anchor_error']}", ""]
+        if L.get("anchor_smoke"):
+            out += ["The small run (same code, same trunks) against the stored slider features:", "",
+                    "| trunk | largest difference | relative to the largest stored value |", "|---|---|---|"]
+            out += [f"| {k} | {v['max_abs']:.2e} | {v['max_rel']:.2e} |" for k, v in L["anchor_smoke"].items()]
+            out.append("")
     return "\n".join(out)
 
 
