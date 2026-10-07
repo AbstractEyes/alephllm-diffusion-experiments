@@ -63,6 +63,33 @@ def test_progress_line_counts_down_from_the_newest_progress_line(capsys):
     assert "10 min in" in out and "about 10 min left" in out and "[arms]" not in out
 
 
+def test_progress_line_names_the_file_of_the_step(capsys):
+    s = object.__new__(sessions._Session)
+    s.note = "file 13 of 15, s1_step245674_gCA_fcap.pt"
+    s.progress(300, "[stitch s1] step245674_gCA_fcap: 4096/8376 captions, 150 s spent, about 157 s left")
+    out = capsys.readouterr().out
+    assert out.strip().startswith("file 13 of 15, s1_step245674_gCA_fcap.pt: 5 min in") and "left in this file" in out
+
+
+def test_stage1_files_in_the_session_order():
+    names = [sessions.stage1_file(*j[:4]) for j in sessions.stage1_jobs(["gCA", "gCB", "gXA"])]
+    assert names == ["s1_random0.pt", "s1_random1.pt", "s1_step245674.pt", "s1_mood_step245674.pt", "s1_mood_random0.pt",
+                     "s1_step245674_gCA.pt", "s1_mood_step245674_gCA.pt", "s1_step245674_gCB.pt", "s1_mood_step245674_gCB.pt",
+                     "s1_step245674_gXA.pt", "s1_mood_step245674_gXA.pt", "s1_step245674_fcap.pt", "s1_step245674_gCA_fcap.pt",
+                     "s1_step245674_gCB_fcap.pt", "s1_step245674_gXA_fcap.pt"]
+    assert [j[4] for j in sessions.stage1_jobs([])] == [True, True, True, False, False, True]   # mood files are not fatal
+
+
+def test_stage1_forms_read_from_the_files(tmp_path, monkeypatch):
+    import torch
+    monkeypatch.setattr(settings, "OUT_DIR", str(tmp_path))
+    torch.save({"x": torch.zeros(2)}, tmp_path / "s1_step1.pt")                                   # before 0.3.0: no record
+    torch.save({"x": torch.zeros(2), "batching": {"form": "padded"}}, tmp_path / "s1_step1_gCA.pt")
+    torch.save({"x": torch.zeros(2), "batching": {"form": "padded"}}, tmp_path / "s1_step1_limit80.pt")
+    assert sessions.s1_forms() == {"s1_step1.pt": "equal", "s1_step1_gCA.pt": "padded"}
+    assert sessions.s1_forms(80) == {"s1_step1_limit80.pt": "padded"}
+
+
 @pytest.mark.parametrize("s,text", [(45, "45 s"), (600, "10 min"), (11160, "3 h 6 min")])
 def test_durations(s, text):
     assert sessions._dur(s) == text

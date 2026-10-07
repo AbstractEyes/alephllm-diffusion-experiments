@@ -17,6 +17,7 @@ install), else ~/.cache/alephllm_diffusion.
 | MOUNT_DATA_DIR | MOUNT_DATA_DIR | <out>/mount_data (the caption pack and the arm results the mount gates read) |
 | MOUNT_READ_OUT | MOUNT_READ_OUT | <home>/mount_read |
 | ANIMA_DATA | ALEPHLLM_DIFFUSION_ANIMA_DATA | <home>/anima (the picture runs' pictures, results and Hugging Face cache) |
+| S1_BATCHING | ALEPHLLM_DIFFUSION_S1_BATCHING | padded (stage 1's batches: "padded" = right-padded batches filled to a byte budget; "equal" = the 0.2.0 form, equal-length groups in 128-caption chunks, to reproduce 0.2.0 files) |
 """
 from __future__ import annotations
 
@@ -57,6 +58,8 @@ DP = os.environ.get("STITCH_DP") or _fork()
 MOUNT_DATA_DIR = os.environ.get("MOUNT_DATA_DIR") or os.path.join(OUT_DIR, "mount_data")
 MOUNT_READ_OUT = os.environ.get("MOUNT_READ_OUT") or str(HOME / "mount_read")
 ANIMA_DATA = os.environ.get("ALEPHLLM_DIFFUSION_ANIMA_DATA") or str(HOME / "anima")
+S1_BATCHING = os.environ.get("ALEPHLLM_DIFFUSION_S1_BATCHING") or "padded"
+assert S1_BATCHING in ("padded", "equal"), f"ALEPHLLM_DIFFUSION_S1_BATCHING must be 'padded' or 'equal', not {S1_BATCHING!r}"
 
 
 def registration() -> dict:

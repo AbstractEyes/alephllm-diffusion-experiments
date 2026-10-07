@@ -100,13 +100,39 @@ def _blackboard(cache):
     return sl.flatten(1)
 
 
+PAD_ID = 0                                                       # the padding byte: it only ever follows a caption's last byte
+
+
+def padded_groups(lengths, max_tokens=16384, max_batch=512):
+    """Batches for the padded form: indices sorted by length, each batch filled while (its longest row x its rows) stays within
+    max_tokens and its rows within max_batch. Sorting keeps the padding small (neighbours differ by a few bytes)."""
+    order = sorted(range(len(lengths)), key=lambda i: lengths[i])
+    groups, cur = [], []
+    for i in order:
+        if cur and (len(cur) + 1 > max_batch or lengths[i] * (len(cur) + 1) > max_tokens):
+            groups.append(cur)
+            cur = []
+        cur.append(i)
+    if cur:
+        groups.append(cur)
+    return groups
+
+
 @torch.no_grad()
 def extract(model, texts, layers, taps=("pool", "last", "bb"), device="cuda", amp=True, max_batch=64, doc=True,
-            bb_dtype=torch.float16, progress=0):
+            bb_dtype=torch.float16, progress=0, pad=False, max_tokens=16384, pad_max_batch=512):
     """-> {tap: {layer: tensor(N, dim)}} on the CPU (pool / last fp32, bb fp16), rows in the order of `texts`;
-    tap 'byte' -> {layer: [tensor(L_i, d)] per caption} (fp32: fp16 overflows at block 31)."""
+    tap 'byte' -> {layer: [tensor(L_i, d)] per caption} (fp32: fp16 overflows at block 31).
+    pad=True: captions of any length share a batch, right-padded to the batch's longest (padded_groups: up to max_tokens bytes
+    and pad_max_batch rows a batch). The trunk is causal (the library's rule: right-padding never reaches a real position), so every
+    caption's own positions see only its own bytes; the pooled, last-byte and per-byte taps read only those positions. The
+    blackboard tap sums every position, padding included, so it keeps the equal-length form (pad=True with 'bb' is refused).
+    Kernel rounding still depends on the batch's shape: under bf16 autocast the two forms differ at the size of bf16 rounding."""
     layers = sorted(set(layers))
     need_bb = "bb" in taps
+    if pad:
+        assert not need_bb, "the blackboard sums every position: it is read in equal-length batches only (pad=False)"
+        return _extract_padded(model, texts, layers, taps, device, amp, doc, progress, max_tokens, pad_max_batch)
     n = len(texts)
     ids = [encode_bytes(t, doc) for t in texts]
     order = sorted(range(n), key=lambda i: ids[i].numel())
@@ -159,6 +185,62 @@ def extract(model, texts, layers, taps=("pool", "last", "bb"), device="cuda", am
                     out["byte"][l][i] = hf[r, s0:].cpu()
         if progress and (pos // len(grp)) % progress == 0:
             print(f"  extract {pos}/{n} ({time.time() - t0:.0f}s)", flush=True)
+    return out
+
+
+def _extract_padded(model, texts, layers, taps, device, amp, doc, progress, max_tokens, max_batch):
+    """extract(pad=True): right-padded batches; each tap reads only the caption's own positions; one copy to the CPU per batch
+    and layer (the rows are sliced on the CPU)."""
+    n = len(texts)
+    ids = [encode_bytes(t, doc) for t in texts]
+    lens = [x.numel() for x in ids]
+    D = model.nf.weight.numel()
+    out = {t: {l: None for l in layers} for t in taps}
+    if "byte" in taps:
+        out["byte"] = {l: [None] * n for l in layers}
+    for t in ("pool", "last"):
+        if t in taps:
+            for l in layers:
+                out[t][l] = torch.zeros(n, D, dtype=torch.float32)
+    s0 = 1 if doc else 0                                       # the DOC position: context, never read
+    t0 = time.time()
+    ctx = torch.autocast("cuda", dtype=torch.bfloat16) if (amp and device == "cuda") else torch.autocast("cpu", enabled=False)
+    groups = padded_groups(lens, max_tokens, max_batch)
+    for k, grp in enumerate(groups):
+        L = max(lens[i] for i in grp)
+        x_ids = torch.full((len(grp), L), PAD_ID, dtype=torch.long)
+        for r, i in enumerate(grp):
+            x_ids[r, :lens[i]] = ids[i]
+        x_ids = x_ids.to(device)
+        with ctx:
+            x = model.embed(x_ids)
+            states = {}
+            if -1 in layers:
+                states[-1] = x
+            for bi, blk in enumerate(model.blocks):
+                x, _cache = blk.prefill(x)
+                if bi in layers:
+                    states[bi] = x
+            if 32 in layers:
+                states[32] = model.nf(x)
+        gl = torch.tensor([lens[i] for i in grp], device=device)
+        pos = torch.arange(L, device=device)
+        real = (pos[None] < gl[:, None]) & (pos[None] >= s0)   # (B, L): the caption's own bytes, the DOC excluded
+        gi = torch.tensor(grp)
+        for l, h in states.items():
+            hf = h.float()
+            assert torch.isfinite(hf[real]).all(), ("non-finite hidden state", l, grp[:4])
+            if "pool" in taps:
+                m = real.to(hf.dtype)[..., None]
+                out["pool"][l][gi] = ((hf * m).sum(1) / m.sum(1)).cpu()
+            if "last" in taps:
+                out["last"][l][gi] = hf[torch.arange(len(grp), device=device), gl - 1].cpu()
+            if "byte" in taps:
+                hc = hf.cpu()                                  # fp32 (block 31 overflows fp16), one copy per batch and layer
+                for r, i in enumerate(grp):
+                    out["byte"][l][i] = hc[r, s0:lens[i]]
+        if progress and (k + 1) % progress == 0:
+            print(f"  extract {sum(len(g) for g in groups[:k + 1])}/{n} ({time.time() - t0:.0f}s)", flush=True)
     return out
 
 

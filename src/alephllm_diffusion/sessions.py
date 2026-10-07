@@ -145,6 +145,35 @@ def resume_dir(name: str) -> str:
     return best
 
 
+def s1_forms(limit=0) -> dict:
+    """{file: stage 1's batch form} for the stage-1 files on disk at this scale (limit 0: the full files; files before 0.3.0
+    record none and are the 'equal' form). Reads only each file's small entries (the tensors are memory-mapped, not read)."""
+    import torch
+    suffix = f"_limit{limit}.pt" if limit else ".pt"
+    out = {}
+    for f in sorted(glob.glob(os.path.join(settings.OUT_DIR, "s1_*.pt"))):
+        name = os.path.basename(f)
+        if not name.endswith(suffix) or (not limit and "_limit" in name):
+            continue
+        d = torch.load(f, map_location="cpu", mmap=True, weights_only=False)
+        out[name] = (d.get("batching") or {"form": "equal"})["form"]
+        del d
+    return out
+
+
+def stage1_jobs(mounts: list) -> list:
+    """Stage 1's files in their order, as (trunk, mount, frame, mood, fatal): the bare trunk and the two untrained controls; the
+    mood form of the trunk and of one control (not fatal: only the export's mood form needs them); each mount with its mood form;
+    the framed column (the trunk, then each mount)."""
+    jobs = [(s, None, None, False, True) for s in ("random:0", "random:1", str(STEP))]
+    jobs += [(str(STEP), None, None, True, False), ("random:0", None, None, True, False)]
+    for g in mounts:
+        jobs += [(str(STEP), g, None, False, True), (str(STEP), g, None, True, False)]
+    for f in FRAMES:
+        jobs += [(str(STEP), None, f, False, True)] + [(str(STEP), g, f, False, True) for g in mounts]
+    return jobs
+
+
 def stage1_file(spec: str, mount=None, frame=None, mood=False, limit=0) -> str:
     """Stage 1's file name for a trunk ('245674' or 'random:0'), as the stage-1 program writes it."""
     base = f"random{spec.split(':')[1]}" if spec.startswith("random:") else f"step{spec}"
@@ -162,6 +191,7 @@ class _Session:
         self.logs = os.path.join(settings.HOME, "logs", "smoke") if smoke else os.path.join(settings.HOME, "logs")
         self.marks = _markers(smoke)
         self.tok = None
+        self.note = ""                                  # the step's own count on progress lines ("file 4 of 15, <name>")
         self.card, total, _ = _card()
         if card_fraction is None:
             card_fraction = 0.90 if total >= 80_000 else 0.70
@@ -264,11 +294,12 @@ class _Session:
         line, at = prog if prog else (last, time.time())
         if m := _CELL.search(line):
             parts.append(f"cell {m[1]} of {m[2]}")
+        note = getattr(self, "note", "")
         if m := _LEFT.search(line):
-            parts.append(f"about {_dur(max(0, int(m[1]) - (time.time() - at)))} left")
+            parts.append(f"about {_dur(max(0, int(m[1]) - (time.time() - at)))} left" + (" in this file" if note else ""))
         if len(parts) == 1 and last:
             parts.append(last[:110])
-        self.say(", ".join(parts))
+        self.say((f"{note}: " if note else "") + ", ".join(parts))
 
     def show_tail(self, path: str, n: int = 25) -> None:
         with open(path, encoding="utf-8", errors="replace") as fh:
@@ -289,19 +320,29 @@ class _Session:
             from . import storage
             storage.restore(patterns, say=self.say)
 
-    def stage1(self, spec: str, mount=None, frame=None, mood=False, fatal=True) -> None:
+    def stage1(self, spec: str, mount=None, frame=None, mood=False, fatal=True, label="", left=None):
+        """One stage-1 file as its own process (kept when on disk). label: the step's count ("file 4 of 15"); left(seconds) -> the
+        step's time left after this file. Returns the seconds it took (None when kept)."""
         name = stage1_file(spec, mount, frame, mood, self.limit)
+        where = f" ({label})" if label else ""
         if os.path.exists(os.path.join(settings.OUT_DIR, name)):
-            self.say(f"{name}: on disk, kept")
-            return
+            self.say(f"{name}: on disk, kept{where}")
+            return None
         args = [spec] + ([self.limit] if self.limit else []) + ([f"--mount={mount}"] if mount else []) \
             + ([f"--frame={frame}"] if frame else []) + (["--mood"] if mood else [])
+        self.note = f"{label}, {name}" if label else ""
         t0 = time.time()
-        rc = self.sh(name[:-3], "alephllm_diffusion.stitch.s1", *args, check=fatal)
+        try:
+            rc = self.sh(name[:-3], "alephllm_diffusion.stitch.s1", *args, check=fatal)
+        finally:
+            self.note = ""
+        secs = time.time() - t0
         if rc:
-            self.say(f"{name}: FAILED (logs/{name[:-3]}.log); the export's mood form will stop, the bare export not")
+            self.say(f"{name}: FAILED (logs/{name[:-3]}.log){where}; the export's mood form will stop, the bare export not")
         else:
-            self.say(f"{name}: written in {_dur(time.time() - t0)}")
+            tail = f"; about {_dur(left(secs))} left in this step" if left else ""
+            self.say(f"{name}: written in {_dur(secs)}{where}{tail}")
+        return secs
 
     def mounts(self) -> list:
         """The mounts that get stage-1 files and grids: the nine-arm group on both seeds, plus the eight alone (gXA) when the
@@ -382,18 +423,28 @@ class _Session:
         self.mark("restart_test")
 
     def do_stage1(self):
+        # one batch form per workspace: stage-1 files made in another form (another release, or the other setting) round
+        # differently under bf16, so a workspace never mixes them (the grid refuses too)
+        other = {f: form for f, form in s1_forms(self.limit).items() if form != settings.S1_BATCHING}
+        if other:
+            raise StepFailed(f"stage-1 files on disk were made with another batch form than this run's "
+                             f"'{settings.S1_BATCHING}': {other}; start a new workspace, or set ALEPHLLM_DIFFUSION_S1_BATCHING to "
+                             "their form to continue them")
         mounts = self.mounts()
-        for spec in ("random:0", "random:1", str(STEP)):
-            self.stage1(spec)
-        self.stage1(str(STEP), mood=True, fatal=False)
-        self.stage1("random:0", mood=True, fatal=False)
-        for g in mounts:
-            self.stage1(str(STEP), mount=g)
-            self.stage1(str(STEP), mount=g, mood=True, fatal=False)
-        for f in FRAMES:
-            self.stage1(str(STEP), frame=f)
-            for g in mounts:
-                self.stage1(str(STEP), mount=g, frame=f)
+        jobs = stage1_jobs(mounts)
+        took = {True: [], False: []}                   # seconds per written file: mood files, state files
+
+        def left(n):
+            def est(secs):
+                took[jobs[n][3]].append(secs)
+                every = took[True] + took[False]
+                rest = [j for j in jobs[n + 1:] if not os.path.exists(os.path.join(settings.OUT_DIR, stage1_file(*j[:4],
+                                                                                                                   self.limit)))]
+                return sum((sum(took[j[3]]) / len(took[j[3]])) if took[j[3]] else sum(every) / len(every) for j in rest)
+            return est
+        for n, (spec, mount, frame, mood, fatal) in enumerate(jobs):
+            self.stage1(spec, mount=mount, frame=frame, mood=mood, fatal=fatal, label=f"file {n + 1} of {len(jobs)}",
+                        left=left(n))
         self.mark("stage1", mounts=mounts)
 
     def pictures(self, stage: str, *extra):

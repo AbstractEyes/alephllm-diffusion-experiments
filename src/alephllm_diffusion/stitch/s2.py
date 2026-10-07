@@ -231,8 +231,14 @@ EXECUTION_CHANGES = ["2026-10-05: adapter_maps_span's per-row copy-out batched (
                      "2026-10-06: the stage programs moved into the alephllm_diffusion package with imports and paths only; the "
                      "smoke chain rerun through the package on the same inputs (stage 1 on every trunk, the grids, the picks, the "
                      "mount contrast, the exports) equals the earlier outputs tensor for tensor and number for number; no number "
-                     "moves"]
+                     "moves",
+                     "2026-10-07: THE SCENE BATCHES: STITCH_SCENES_PER_PASS whole scenes share one pass of the one-slot and "
+                     "matched-span runs (right-padded rows, each row's own slot position and masks; 1 = one scene per pass, the "
+                     "earlier form); the copies to the CPU are made once per pass and the rows sliced there (the same values); "
+                     "checked in every run that uses it: the empty slot and the filler span run in both forms, tier 1 bit-identical "
+                     "or tier 2 under ten times the batch-shape floor, else the run stops"]
 MAPS_ROWWISE = os.environ.get("STITCH_MAPS_ROWWISE") == "1"
+SCENES_PER_PASS = int(os.environ.get("STITCH_SCENES_PER_PASS", "1"))     # whole scenes per pass (1 = one scene, the earlier form)
 STOP_FILE = os.path.join(OUT_DIR, "STOP")    # touch it: the grid stops at the next cell boundary and saves what exists (a file older
 #                                              than the job's start is ignored, so no stale file has to be deleted)
 BUDGET = {"ram_gb": float(os.environ.get("STITCH_RAM_GB", "16")), "wall_h": float(os.environ.get("STITCH_WALL_H", "8")),
@@ -965,8 +971,10 @@ def main(name: str, device: str = "cuda"):
     phrase_txt = [s0["phrases"][e["phrase"]]["text"] for e in evals]
     emb = qwen.embed_tokens.weight.float().cpu()
     relays = {}                                         # name -> (fit-row features, slot features [E], span token features [NT])
+    forms = {}                                          # stage 1's batch form per file (files before 0.3.0: the equal form)
     for tag in cfg["her"] + cfg["controls"]:
         s1 = torch.load(os.path.join(OUT_DIR, f"s1_{tag}.pt"), weights_only=False)
+        forms[tag] = (s1.get("batching") or {"form": "equal"})["form"]
         assert s1["fit_close"].shape[0] == len(rows) and s1["eval_close"].shape[0] == E, (tag, s1["fit_close"].shape,
                                                                                          s1["eval_close"].shape, len(rows), E)
         assert not span_on or s1["evaltok_close"].shape[0] == len(eval_tok), (tag, "the stage-1 file predates the matched span")
@@ -976,6 +984,8 @@ def main(name: str, device: str = "cuda"):
                 relays[f"{tag}|b{b}|{conv}"] = (s1[f"fit_{conv}"][:, bi].clone(), s1[f"eval_{conv}"][:, bi].clone(),
                                                 s1[f"evaltok_{conv}"][:, bi].clone() if span_on else None)
         del s1
+    assert len(set(forms.values())) == 1, (f"stage-1 files of different batch forms {forms}: under bf16 they round differently; "
+                                           "remake them in one form (ALEPHLLM_DIFFUSION_S1_BATCHING)")
     if cfg["floors"]:
         tok_txt = ([evals[ei]["text"][a:e] for ei, a, e in zip(eval_tok[:, 0].tolist(), eval_tok[:, 5].tolist(),
                                                                 eval_tok[:, 6].tolist())] if span_on else None)
@@ -989,6 +999,7 @@ def main(name: str, device: str = "cuda"):
         tag, blk, conv = x.split("|")
         assert x not in relays and tag in cfg["her"] + cfg["controls"] and int(blk[1:]) in cfg["blocks"], x
         s1 = torch.load(os.path.join(OUT_DIR, f"s1_{tag}.pt"), weights_only=False)
+        assert (s1.get("batching") or {"form": "equal"})["form"] in set(forms.values()), (x, "a stage-1 file of another batch form")
         bi = s1["blocks"].index(int(blk[1:]))
         relays[x] = (s1[f"fit_{conv}"][:, bi].clone(), s1[f"eval_{conv}"][:, bi].clone(),
                      s1[f"evaltok_{conv}"][:, bi].clone() if span_on else None)
@@ -1003,33 +1014,50 @@ def main(name: str, device: str = "cuda"):
     by_scene = {sc: [i for i, s in enumerate(scene_of) if s == sc] for sc in scenes}
     offset = torch.tensor([bases[s]["q_m"] - bases[s]["slot_n"] for s in scene_of])
 
-    def run_slot(vecs_at, qm=None, adm=None, maps=True, split=1):
+    def scene_groups(split=1, per_pass=None):
+        """The passes: `per_pass` whole scenes each (SCENES_PER_PASS by default; scene order kept), each pass cut into `split`
+        interleaved parts (a second batch shape, for the fp32 repeat floor). per_pass 1 = the earlier form, one scene per pass."""
+        k = per_pass or SCENES_PER_PASS
+        sc_lists = list(by_scene.values())
+        packs = [sum(sc_lists[a:a + k], []) for a in range(0, len(sc_lists), k)]
+        return [p[h::split] for p in packs for h in range(split)]
+
+    def run_slot(vecs_at, qm=None, adm=None, maps=True, split=1, per_pass=None):
         """vecs_at: None (the empty slot) or (depth, [E, D] vectors). Returns the slot's final states, the module's output at the
         slot question and at the other T5 positions, and (maps) hit, leak, the slot's keys and values. split = the batches per
-        scene (2: a second batch shape, for the fp32 repeat floor)."""
+        pass (2: a second batch shape, for the fp32 repeat floor); per_pass = whole scenes per pass (scene_groups)."""
         qm = qwen if qm is None else qm
         adm = ad if adm is None else adm
         res = {"maps": maps, "final": torch.zeros(E, 1024), "aq": torch.zeros(E, 1024), "other": [None] * E,
                "hit": torch.zeros(E), "leak": torch.zeros(E), "keys": [None] * E, "vals": [None] * E}
-        groups = [idx[h::split] for idx in by_scene.values() for h in range(split)]
-        for idx in groups:
-            sc = scene_of[idx[0]]
-            bs = bases[sc]
-            pos = torch.tensor([bs["slot_n"]] * len(idx))
+        for idx in scene_groups(split, per_pass):
+            bss = [bases[scene_of[i]] for i in idx]
+            pos = torch.tensor([b["slot_n"] for b in bss])
             patch = None if vecs_at is None else (vecs_at[0], pos, vecs_at[1][idx])
-            out, _ = qwen_run(qm, [bs["qwen_ids"]] * len(idx), device, patch=patch)
-            smb = torch.ones(len(idx), len(bs["qwen_ids"]))
-            t5b = torch.tensor([bs["t5_ids"]] * len(idx))
-            y = adapter_module(adm, out, smb, t5b, torch.ones_like(t5b), device)
-            res["final"][idx] = out[:, bs["slot_n"]].cpu()
-            res["aq"][idx] = y[:, bs["q_m"]].cpu()
-            for j, i in enumerate(idx):
-                res["other"][i] = torch.cat([y[j, :bs["q_m"]], y[j, bs["q_m"] + 1:]]).cpu()
+            if len({scene_of[i] for i in idx}) == 1:           # one scene: every row the same prompt, no padding (as before)
+                bs = bss[0]
+                out, _ = qwen_run(qm, [bs["qwen_ids"]] * len(idx), device, patch=patch)
+                smb = torch.ones(len(idx), len(bs["qwen_ids"]))
+                t5b = torch.tensor([bs["t5_ids"]] * len(idx))
+                t5m = torch.ones_like(t5b)
+            else:                                              # several scenes: right-padded rows, each its own masks
+                q_list = [b["qwen_ids"] for b in bss]
+                out, _ = qwen_run(qm, q_list, device, patch=patch)
+                smb = pad_batch(q_list)[1]
+                t5b, t5m = pad_batch([b["t5_ids"] for b in bss])
+            y = adapter_module(adm, out, smb, t5b, t5m, device)
+            rows_d = torch.arange(len(idx), device=out.device)
+            res["final"][idx] = out[rows_d, pos.to(out.device)].cpu()
+            res["aq"][idx] = y[rows_d, torch.tensor([b["q_m"] for b in bss], device=y.device)].cpu()
+            yc = y.cpu()                                       # one copy per pass; the rows are sliced on the CPU
+            for j, (i, b) in enumerate(zip(idx, bss)):
+                res["other"][i] = torch.cat([yc[j, :b["q_m"]], yc[j, b["q_m"] + 1:len(b["t5_ids"])]])
             if maps:
-                _, h, lk, k, v = adapter_maps(adm, out, smb, t5b, torch.ones_like(t5b), pos, device)
+                _, h, lk, k, v = adapter_maps(adm, out, smb, t5b, t5m, pos, device)
                 res["hit"][idx], res["leak"][idx] = h.cpu(), lk.cpu()
+                kc, vc = k.cpu(), v.cpu()
                 for j, i in enumerate(idx):
-                    res["keys"][i], res["vals"][i] = k[j].cpu(), v[j].cpu()
+                    res["keys"][i], res["vals"][i] = kc[j], vc[j]
         if maps:
             res["keys"], res["vals"] = torch.stack(res["keys"]), torch.stack(res["vals"])
         return res
@@ -1043,6 +1071,21 @@ def main(name: str, device: str = "cuda"):
         return out
 
     empty = run_slot(None)
+    scene_check = {"scenes_per_pass": SCENES_PER_PASS}
+
+    def scene_batch_check(form, new, ref, keys):
+        """THE SCENE-BATCH CHECK: a run's outputs with SCENES_PER_PASS scenes a pass against one scene a pass; tier 1 bit-identical,
+        tier 2 under ten times the batch-shape floor, else the run stops."""
+        tier, dmax = maps_equivalence([new[k] for k in keys], [ref[k] for k in keys], 10.0 * batch_floor)
+        scene_check[form] = {"tier": tier, "max_relative_difference": dmax}
+        print(f"[stitch s2] THE SCENE-BATCH CHECK ({form}, {SCENES_PER_PASS} scenes a pass against one): "
+              + ("bit-identical (tier 1)" if tier == 1 else f"equal within the registered repeat floor (tier 2; max relative "
+                 f"difference {dmax:.1e} under {10.0 * batch_floor:.1e})" if tier == 2 else
+                 f"DIFFERENT (max relative difference {dmax:.1e}): the run stops"), flush=True)
+        assert tier is not None, f"the scene batches differ from one scene a pass ({form}: {dmax:.2e} relative)"
+    if SCENES_PER_PASS > 1:
+        scene_batch_check("the empty slot", empty, run_slot(None, per_pass=1),
+                          ("final", "aq", "other", "hit", "leak", "keys", "vals"))
     ceil_run = run_slot(("28post", selfv["28post"])) if "28post" in depths else None
     e_ceil = ceil_run["aq"] - empty["aq"]
     e_ceil_c = centred(e_ceil)
@@ -1109,9 +1152,9 @@ def main(name: str, device: str = "cuda"):
             return out
 
         def run_span(vecs_at=None, q_ids="qwen_ids", t_ids="t5_ids", t_span="t5_span", qm=None, adm=None, maps=False, split=1,
-                     collect_depths=None, base=None, keep_other=False, check_equal=None):
-            """The matched-span runs, one scene per batch (split: batches per scene). vecs_at = None (unpatched) or (depth, [NT, D]
-            vectors, one per phrase-token row). q_ids / t_ids / t_span name stage 0's fields (the phrase caption's or the filler
+                     collect_depths=None, base=None, keep_other=False, check_equal=None, per_pass=None):
+            """The matched-span runs, whole scenes per pass (scene_groups; split: batches per pass; per_pass: scenes per pass).
+            vecs_at = None (unpatched) or (depth, [NT, D] vectors, one per phrase-token row). q_ids / t_ids / t_span name stage 0's fields (the phrase caption's or the filler
             caption's). Returns the module's output pooled over the question pieces [E, D], the final states at the phrase tokens,
             the leak into the other T5 positions against `base` (another run of this function, kept with keep_other), and (maps)
             hit, leak, the answer tokens' keys and values; collect_depths -> Qwen3's residuals at the phrase tokens [NT, D] per
@@ -1122,8 +1165,7 @@ def main(name: str, device: str = "cuda"):
                    "leak_task": torch.zeros(E), "hit": torch.zeros(E), "leak": torch.zeros(E), "keys": [None] * E,
                    "vals": [None] * E, "collected": {d: torch.zeros(NT, 1024) for d in (collect_depths or [])}, "copy_gap": 0.0,
                    "hit_h": torch.zeros(E, n_blk, n_head), "leak_h": torch.zeros(E, n_blk, n_head), "slog": [None] * E}
-            groups = [idx[h::split] for idx in by_scene.values() for h in range(split)]
-            for idx in groups:
+            for idx in scene_groups(split, per_pass):
                 q_list = [evals[i][q_ids] for i in idx]
                 sm = pad_batch(q_list)[1]
                 tids, tm = pad_batch([evals[i][t_ids] for i in idx])
@@ -1138,12 +1180,15 @@ def main(name: str, device: str = "cuda"):
                 for d in (collect_depths or []):
                     res["collected"][d][prr] = got[d][prow, ppos]
                 y = adapter_module(adm, out, sm, tids, tm, device)
+                # the same per-row means on the card, then one copy per pass; the gathers are made on the CPU (the same values)
+                aq = torch.stack([y[j, evals[i][t_span]].mean(0) for j, i in enumerate(idx)]).cpu()
+                oc, yc = out.cpu(), y.cpu()
                 for j, i in enumerate(idx):
                     sp = evals[i][t_span]
-                    res["aq"][i] = y[j, sp].mean(0).cpu()
-                    res["final"][i] = out[j, evals[i]["phrase_toks"]].cpu()
+                    res["aq"][i] = aq[j]
+                    res["final"][i] = oc[j, evals[i]["phrase_toks"]]
                     oth = [t for t in range(len(evals[i][t_ids])) if t not in sp]
-                    o = y[j, oth].cpu()
+                    o = yc[j, oth]
                     if keep_other:
                         res["other"][i] = o
                     if base is not None:
@@ -1165,6 +1210,9 @@ def main(name: str, device: str = "cuda"):
             return res
 
         base_sp = run_span(q_ids="filler_qwen_ids", keep_other=True, maps=True)
+        if SCENES_PER_PASS > 1:
+            scene_batch_check("the filler span", base_sp, run_span(q_ids="filler_qwen_ids", keep_other=True, maps=True, per_pass=1),
+                              ("aq", "final", "other", "hit", "leak", "keys", "vals", "hit_h", "leak_h", "slog"))
         ceil_sp = run_span(maps=True, collect_depths=depths, base=base_sp)
         fband = torch.tensor([band_shares(a, c, band_lo, band_hi) for a, c in zip(base_sp["slog"], ceil_sp["slog"])])   # [E, 3]
         fband[self_phrase] = float("nan")                   # the filler's own band shares (the reference beside every arm)
@@ -1506,7 +1554,8 @@ def main(name: str, device: str = "cuda"):
         result["span"] = {"precision": precision_sp, "exactness": {"span_self_patch_bit_exact_every_depth": True,
                                                                      "maps_copy_gap_rel": ceil_sp["copy_gap"],
                                                                      "maps_batched_vs_frozen": {"tier": maps_tier,
-                                                                                                "max_rel_diff": maps_dmax}},
+                                                                                                "max_rel_diff": maps_dmax},
+                                                                     "scene_batches": scene_check},
                           "n_record_phrases": n_rec, "classes": {c: int(cmask[c].sum()) for c in CLASSES},
                           "per_phrase": per_phrase, "ceiling": reads_span(ceil_sp), "context_spread_centred_cos": spread_sp,
                           "cells": {}}

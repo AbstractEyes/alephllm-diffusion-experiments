@@ -35,7 +35,14 @@ from ..beatrix import extract as bx  # noqa: E402
 
 BLOCKS = [8, 12, 16, 18, 20, 22, 24, 28]
 OUT_DIR = settings.OUT_DIR
-CHUNK = 128
+# THE BATCHES (settings.S1_BATCHING): "padded" hands the extractor 1,024 captions at a time and lets it fill right-padded batches
+# up to 16,384 bytes (the trunk is causal: a caption's own positions never see the padding); "equal" is the 0.2.0 form (128 captions
+# at a time, batches of equal byte length only, ~4 captions a pass). Under bf16 autocast the two round differently (batch shape),
+# so a file records its form and the grid refuses to mix forms.
+PADDED = settings.S1_BATCHING == "padded"
+CHUNK = 1024 if PADDED else 128
+BATCHING = ({"form": "padded", "chunk": CHUNK, "max_tokens": 16384, "max_batch": 512} if PADDED else
+            {"form": "equal", "chunk": CHUNK, "max_batch": 64})
 SCENE_STEP = 4                                                          # e029's scenes: e001's [::4], the contact sheet's rows
 FRAMES = {"cap": "caption: "}                                           # the caption arm's own line label (the pack's render_row)
 
@@ -117,10 +124,12 @@ def main_mood(arg: str, limit: int = 0, device: str = "cuda", mount: str | None 
     for r, (n, _k, close, last, _vr) in enumerate(rows):
         by_n.setdefault(n, []).append((r, close, last))
     t0 = time.time()
-    print(f"[stitch s1] {tag} THE MOOD FORM: {len(texts)} captions, {len(rows)} phrase tokens, blocks {BLOCKS}", flush=True)
+    print(f"[stitch s1] {tag} THE MOOD FORM: {len(texts)} captions, {len(rows)} phrase tokens, blocks {BLOCKS}; batches: "
+          f"{BATCHING}", flush=True)
     for c0 in range(0, len(texts), CHUNK):
         ns = list(range(c0, min(c0 + CHUNK, len(texts))))
-        ex = bx.extract(model, [texts[n] for n in ns], layers=BLOCKS, taps=("byte",), device=device, amp=(device == "cuda"))
+        ex = bx.extract(model, [texts[n] for n in ns], layers=BLOCKS, taps=("byte",), device=device, amp=(device == "cuda"),
+                        pad=PADDED)
         for j, n in enumerate(ns):
             states = [ex["byte"][b][j] for b in BLOCKS]
             assert states[0].shape[0] == len(texts[n].encode("utf-8")), (states[0].shape, len(texts[n]))
@@ -133,7 +142,7 @@ def main_mood(arg: str, limit: int = 0, device: str = "cuda", mount: str | None 
     path = os.path.join(OUT_DIR, f"s1_mood_{tag}.pt")
     torch.save({**out, "blocks": BLOCKS, "arg": arg, "seed": seed, "limit": limit, "eval_index": sel, "texts": texts,
                 "rows": torch.tensor(rows, dtype=torch.long), "s0_sha256": hashlib.sha256(open(s0_path, "rb").read()).hexdigest(),
-                "mount": mount_rec}, path)
+                "mount": mount_rec, "batching": BATCHING}, path)
     print(f"[stitch s1] wrote {path} in {time.time() - t0:.0f} s", flush=True)
     return path
 
@@ -164,10 +173,11 @@ def main(arg: str, limit: int = 0, device: str = "cuda", mount: str | None = Non
     jobs = [("fit", i, pre + f["text"]) for i, f in enumerate(fit)] + [("eval", i, pre + e["text"]) for i, e in enumerate(evals)]
     total = len(jobs)
     print(f"[stitch s1] {tag}: {n_fit} fit captions ({len(rows)} rows) + {n_eval} eval captions = {total} captions, blocks {BLOCKS}"
-          + (f"; every caption framed {pre!r} (positions +{off})" if pre else ""), flush=True)
+          + (f"; every caption framed {pre!r} (positions +{off})" if pre else "") + f"; batches: {BATCHING}", flush=True)
     for c0 in range(0, total, CHUNK):
         chunk = jobs[c0:c0 + CHUNK]
-        ex = bx.extract(model, [t for _, _, t in chunk], layers=BLOCKS, taps=("byte",), device=device, amp=(device == "cuda"))
+        ex = bx.extract(model, [t for _, _, t in chunk], layers=BLOCKS, taps=("byte",), device=device, amp=(device == "cuda"),
+                        pad=PADDED)
         for j, (kind, i, text) in enumerate(chunk):
             states = [ex["byte"][b][j] for b in BLOCKS]                   # each (len(text) bytes, d), the DOC position excluded
             assert states[0].shape[0] == len(text.encode("utf-8")), (states[0].shape, len(text))
@@ -187,7 +197,7 @@ def main(arg: str, limit: int = 0, device: str = "cuda", mount: str | None = Non
               flush=True)
     path = os.path.join(OUT_DIR, f"s1_{tag}.pt")
     torch.save({**out, "blocks": BLOCKS, "arg": arg, "seed": seed, "limit": limit, "n_eval_tok": len(eval_tok), "mount": mount_rec,
-                "frame": pre}, path)
+                "frame": pre, "batching": BATCHING}, path)
     print(f"[stitch s1] wrote {path} in {time.time() - t0:.0f} s", flush=True)
     return path
 
