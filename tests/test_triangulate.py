@@ -219,3 +219,29 @@ def test_the_comparisons_and_decisions_end_to_end():
     L = {"_meta": {"step": 0, "k": 6}, "draw1": R1, "draw2": R2, "decisions": dec}
     md = TR.report(L)
     assert "THE PICK" in md and "| A-hub-18 |" in md
+
+
+def test_the_experiment_page_from_a_ledger(tmp_path):
+    import json
+    from alephllm_diffusion.triangulate import experiment as EX
+    D1, Q1, s1 = _synthetic_draw(4)
+    D2, Q2, s2 = _synthetic_draw(5, untrained=False)
+    R1, R2 = TR.gauges(s1, Q1, D1, 6), TR.gauges(s2, Q2, D2, 6)
+    meta = {"step": 245674, "k": 6, "r_hub": 12, "n_caps": 40, "stream_blocks": [16, 18], "hub_blocks": [18, 22],
+            "rows": {"draw1": {"captions": 400, "mood": 74}, "draw2": {"captions": 400, "mood": 74}}, "commit": "abcdef1234",
+            "anchor": {"block": 18, "rows": 10, "max_abs_diff": 1e-5}, "outliers": {"qwen|draw1": 0},
+            "shares": {"trained|A|draw1": {"18": 0.99, "22": 0.98}}, "started_utc": "2026-10-07 05:51:00", "seconds": 1200.0,
+            "finished_utc": "2026-10-07 06:12:00"}
+    L = json.loads(json.dumps({"_meta": meta, "draw1": R1, "draw2": R2, "decisions": TR.decide(R1, R2)}))
+    path = tmp_path / "triangulation_step245674.json"
+    path.write_text(json.dumps(L), encoding="utf-8")
+    mt = EX.write(str(path), str(tmp_path / "mirror"))
+    folder = tmp_path / "mirror" / "experiments" / EX.EXPERIMENT_ID
+    assert {"README.md", "meta.json", "result.json"} <= {p.name for p in folder.iterdir()}
+    page = (folder / "README.md").read_text(encoding="utf-8")
+    assert EX.EXPERIMENT_ID.startswith("e038_") and "THE PICK" in page and "aĠtacoĠonĠaĠplate." in page
+    assert mt["id"] == EX.EXPERIMENT_ID and mt["status"] == "done" and mt["seconds"] == 1200 and mt["summary"]
+    L["_meta"]["smoke"] = True
+    path.write_text(json.dumps(L), encoding="utf-8")
+    with pytest.raises(ValueError):
+        EX.write(str(path), str(tmp_path / "mirror2"))

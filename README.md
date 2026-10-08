@@ -44,7 +44,7 @@ The fork carries submodules for other models; only ComfyUI is needed here, so a 
 | diffusers / accelerate / peft | 0.35.2 / 1.15.0 / 0.21.2 |
 | alephllm | 0.10.7, commit 4da43e7 |
 | amoe-lora | commit 9e95a0a (the `experimental` branch; `amoe` 0.2.11) |
-| anima-trainer | commit 40e7b04 |
+| anima-trainer | commit bd1bc50 |
 | diffusion-pipe fork | commit 84e7fe3, its ComfyUI at 0ba903b |
 
 On Windows the file adds `triton-windows` (for `torch.compile`); DeepSpeed, used for multi-card picture runs, installs on
