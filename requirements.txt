@@ -60,9 +60,9 @@ ninja==1.13.2
 deepspeed==0.18.4 ; sys_platform == "linux"               # multi-card picture runs; Linux only
 
 # --- the AlephLLM libraries, pinned by commit
-geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@4da43e75e002670e659126f838225d6795fb4308
+geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@9f555f6fa2c5ce52290e5ee5a2a12706646abdf6
 amoe-lora @ git+https://github.com/AbstractEyes/amoe-lora@9e95a0a4d402405b83daba2819350073ca2ae3ca
-geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@4ab9c83903e427e415a3c62688fa6a7f904ba273
+geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@4d1867fd084aa36112edd9ce65503d520b674721
 
 # --- tests
 pytest==9.1.1

@@ -6,6 +6,7 @@
     sessions.run(3)      # the pictures of the relay arms                                               (about 1-1.5 h)
     sessions.run(4)      # the hub sliders: three readings of a mood phrase, seven slider arms         (about 2-2.5 h)
     sessions.run(5)      # the slider at the dual-extraction read's pick, neutral phrases off its sides (about 1-1.5 h)
+    sessions.run(6)      # the slider read through the Qwen tokenizer arm, its control, her plain reading (about 1-1.5 h)
     sessions.status()    # every step: done, or not yet
     sessions.stop()      # a running grid stops at its next cell and keeps its cells; run the session again to resume
 
@@ -48,7 +49,7 @@ E029_META = "experiments/e029_anima_relay_in_pictures/meta.json"
 # nine arms mounted (the hub read, experiment e030, decided the stream's reading and measured the other two; the arms run in
 # this order)
 HUB_READINGS = ("close/stream/18", "close/hub/22", "close/both/18")
-REFERENCE_SESSIONS = (1, 2, 3)        # the sessions that read the fixed reference data; sessions 4-5 build their own inputs
+REFERENCE_SESSIONS = (1, 2, 3)        # the sessions that read the fixed reference data; sessions 4-6 build their own inputs
 SLIDER_ARMS = ("e031_beatrix_stream_closing_slider", "e032_beatrix_random_trunk_stream_closing_slider",
                "e033_beatrix_stream_closing_slider_nine_arms", "e034_beatrix_hub_slider", "e035_beatrix_random_trunk_hub_slider",
                "e036_beatrix_hub_and_stream_slider", "e037_beatrix_random_trunk_hub_and_stream_slider")
@@ -58,6 +59,13 @@ SLIDER_ARMS = ("e031_beatrix_stream_closing_slider", "e032_beatrix_random_trunk_
 PICK_READINGS = ("close/stream/20",)
 PICK_ARMS = ("e039_beatrix_block20_slider_neutral_off", "e040_beatrix_random_trunk_block20_slider_neutral_off",
              "e041_beatrix_block20_slider")
+# session 6, the slider read through the Qwen tokenizer arm (a surface arm: Beatrix reads Qwen3's spelling of a text as she reads
+# its own bytes; the read of record on the arm chose the block): her reading of each phrase in the grid's caption form through
+# the arm, its control on the untrained copy with its own arm, and her plain reading in the same mount, each with the neutral
+# phrases off both sides in training as in session 5 (the arms run in this order)
+ARM_SURFACE, ARM_BLOCK = "qwen3", 20
+ARM_READING = f"frame/{ARM_SURFACE}-arm/{ARM_BLOCK}"
+ARM_ARMS = ("e042_beatrix_qwen_arm_slider", "e043_beatrix_random_trunk_qwen_arm_slider", "e044_beatrix_plain_mounted_slider")
 
 
 class StepFailed(RuntimeError):
@@ -104,6 +112,12 @@ STEPS = (
     Step("pick_sliders", 5, "the slider arms: her reading with the neutral phrases kept off both sides in training, its "
                             "untrained control, and her reading with session 4's recipe (about 700 pictures; the render batch "
                             "timed first)", 70, smoke=False),
+    Step("arm_features", 6, "Beatrix's slider features read through the Qwen tokenizer arm (each phrase in the grid's caption "
+                            "form, her stream at its closing full stop): through the arm, with the arm masked, and on the "
+                            "untrained copy with its own arm; to the public data repo", 5),
+    Step("arm_sliders", 6, "the slider arms: her reading through the arm, its untrained control and her plain reading in the "
+                           "same mount, each with the neutral phrases off both sides in training (about 700 pictures; the "
+                           "render batch timed first)", 65, smoke=False),
 )
 RESTORE = {                           # fetched at a session's start when missing (globs relative to the workspace)
     1: ["markers/*.json", "reports/*", "mount_read/*", "out/s1_*.pt"],
@@ -111,6 +125,7 @@ RESTORE = {                           # fetched at a session's start when missin
     3: ["markers/*.json", "reports/*", "out/e029_export_*"],
     4: ["markers/*.json", "reports/*"],
     5: ["markers/*.json", "reports/*"],
+    6: ["markers/*.json", "reports/*"],
 }
 SAVE = {                              # sent to the data store at a session's end
     1: ["markers/*.json", "logs/*", "reports/*", "reports/env/*", "mount_read/*", "out/s1_*.pt",
@@ -120,6 +135,7 @@ SAVE = {                              # sent to the data store at a session's en
     3: ["markers/*.json", "logs/*", "reports/*"],
     4: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
     5: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
+    6: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
 }
 GRID_FILES = ["out/stitch_*_cells_*/*", "out/stitch_*.json", "out/stitch_*_percaption.pt", "logs/*.log"]
 CHECKPOINT = {"stage1": ["out/s1_*.pt", "logs/*.log"], "grid_record": GRID_FILES, "grid_mounts": GRID_FILES}
@@ -537,6 +553,19 @@ class _Session:
     def do_pick_sliders(self):
         self.slider_arms("pick_sliders", PICK_ARMS)
 
+    def do_arm_features(self):
+        """triangulate.arm_features: the three tensors read through the arm at ARM_BLOCK, uploaded like the other features."""
+        args = [f"--surface={ARM_SURFACE}", f"--block={ARM_BLOCK}"] + ([] if self.smoke else ["--upload=1"])
+        self.sh("arm_features", "alephllm_diffusion.triangulate.arm_features", *args,
+                env={"HF_TOKEN": "" if self.smoke else self.token()})
+        f = f"mood_phrases_{ARM_READING.replace('/', '-')}_mini-beatrix-3_step{STEP}.safetensors"
+        if not os.path.exists(os.path.join(settings.OUT_DIR, f)):
+            raise StepFailed(f"the features step wrote no {f} (logs/arm_features.log)")
+        self.mark("arm_features", files=[f], uploaded=not self.smoke)
+
+    def do_arm_sliders(self):
+        self.slider_arms("arm_sliders", ARM_ARMS)
+
     # ------------------------------------------------------------------ the session
     def start(self, session: int, steps: list) -> None:
         from . import models
@@ -573,7 +602,7 @@ class _Session:
 
     def reference(self, session: int) -> None:
         """The fixed reference inputs of the sessions that read them (REFERENCE_SESSIONS): fetched from the data store, or
-        required on disk when it is off, and checked against their recorded SHA-256. Sessions 4 and 5 read none."""
+        required on disk when it is off, and checked against their recorded SHA-256. Sessions 4-6 read none."""
         if session not in REFERENCE_SESSIONS:
             return
         from . import storage
@@ -598,12 +627,12 @@ def _session_steps(session: int) -> list:
 
 def run(session: int, smoke: bool = False, store: bool | None = None, card_fraction: float | None = None,
         ram_gb: float | None = None, card_free_mib: int = 2000, verbose: bool = False) -> bool:
-    """Run session 1, 2, 3, 4 or 5: every step not yet done, in order; True when the session completes. store: the private data store
+    """Run session 1, 2, 3, 4, 5 or 6: every step not yet done, in order; True when the session completes. store: the private data store
     (default: on, off in a smoke run). card_fraction / ram_gb: the card's per-process memory fraction and the grid's host-memory
     budget (defaults from the machine). card_free_mib: a step starts only while the card holds at most this much (one card, one
     job). verbose: every output line of every step."""
     steps = _session_steps(session)
-    assert steps, f"there is no session {session} (1, 2, 3, 4 or 5)"
+    assert steps, f"there is no session {session} (1, 2, 3, 4, 5 or 6)"
     s = _Session(smoke, (not smoke) if store is None else store, card_fraction, ram_gb, card_free_mib, verbose)
     t_all = time.time()
     try:
@@ -642,7 +671,7 @@ def run(session: int, smoke: bool = False, store: bool | None = None, card_fract
 
 
 def status(smoke: bool = False, fetch: bool = False) -> None:
-    """Every step of the four sessions: done (when, on which card) or not yet. fetch: first fetch the markers of sessions run
+    """Every step of every session: done (when, on which card) or not yet. fetch: first fetch the markers of sessions run
     on other machines from the data store."""
     if fetch:
         from . import storage
@@ -721,8 +750,8 @@ def summary(session: int, smoke: bool = False) -> None:
         print(f"the export: {[f for f in ex if f.endswith('.safetensors')]}")
     elif session == 3:
         print(f"the pictures and their reads: {EXPERIMENTS_REPO}, {os.path.dirname(E029_META)}")
-    elif session in (4, 5):
-        arms = SLIDER_ARMS if session == 4 else PICK_ARMS
+    elif session in (4, 5, 6):
+        arms = {4: SLIDER_ARMS, 5: PICK_ARMS, 6: ARM_ARMS}[session]
         for arm in arms:
             m = load(settings.ANIMA_DATA, "experiments", arm, "result.json")
             if m and m.get("reads"):

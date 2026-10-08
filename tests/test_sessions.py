@@ -11,8 +11,8 @@ from alephllm_diffusion import sessions, settings, storage
 def test_every_step_has_its_function():
     for st in sessions.STEPS:
         assert callable(getattr(sessions._Session, f"do_{st.name}", None)), st.name
-    assert {st.session for st in sessions.STEPS} == {1, 2, 3, 4, 5}
-    assert set(sessions.RESTORE) == set(sessions.SAVE) == {1, 2, 3, 4, 5}
+    assert {st.session for st in sessions.STEPS} == {1, 2, 3, 4, 5, 6}
+    assert set(sessions.RESTORE) == set(sessions.SAVE) == {1, 2, 3, 4, 5, 6}
     assert len({st.name for st in sessions.STEPS}) == len(sessions.STEPS)      # the markers are named by step
 
 
@@ -21,18 +21,28 @@ def test_the_hub_sliders_name_their_readings_and_arms():
     for r in sessions.HUB_READINGS + sessions.PICK_READINGS:
         features.parse(r)                                  # every reading is one the features file can be built for
     from geolip_anima_trainer import anima_experiments as ax
-    for readings, arms in ((sessions.HUB_READINGS, sessions.SLIDER_ARMS), (sessions.PICK_READINGS, sessions.PICK_ARMS)):
+    for readings, arms in ((sessions.HUB_READINGS, sessions.SLIDER_ARMS), (sessions.PICK_READINGS, sessions.PICK_ARMS),
+                           ((sessions.ARM_READING,), sessions.ARM_ARMS)):
         files = {ax.HUB_FEATURES[r] for r in readings}
         assert list(arms) == [a.id for a in ax.CONNECTOR_ARMS if a.features in files]   # the trainer's arms, in its order
-    assert set(sessions.HUB_READINGS + sessions.PICK_READINGS) == set(ax.HUB_FEATURES)  # each file a session builds is read
+    built = sessions.HUB_READINGS + sessions.PICK_READINGS + (sessions.ARM_READING,)
+    assert set(built) == set(ax.HUB_FEATURES)                                         # each file a session builds is read
     assert [a[:4] for a in sessions.SLIDER_ARMS] == [f"e03{i}" for i in range(1, 8)]
     assert [a[:4] for a in sessions.PICK_ARMS] == ["e039", "e040", "e041"]
     arms = {a.id: a for a in ax.CONNECTOR_ARMS}
     assert [arms[a].neutral_sides for a in sessions.PICK_ARMS] == [False, False, True]    # session 5's one factor
     assert [arms[a].source for a in sessions.PICK_ARMS] == ["trained", "random", "trained"]
+    assert [a[:4] for a in sessions.ARM_ARMS] == ["e042", "e043", "e044"]
+    assert [arms[a].source for a in sessions.ARM_ARMS] == ["qwen", "qwen_random", "plain"]   # the arm features' tensors
+    assert not any(arms[a].neutral_sides for a in sessions.ARM_ARMS)                    # each in e039's form
+    assert (sessions.ARM_ARMS[0], sessions.ARM_ARMS[1]) in ax.CONNECTOR_PAIRS            # the slider and its control
     for rid in (ax.HUB_READ_ID, ax.TRIANGULATION_ID):     # the reads' folders: no arm of either session takes them
-        assert rid not in sessions.SLIDER_ARMS + sessions.PICK_ARMS
+        assert rid not in sessions.SLIDER_ARMS + sessions.PICK_ARMS + sessions.ARM_ARMS
     assert ax.HUB_READ_ID[:4] == "e030" and ax.TRIANGULATION_ID[:4] == "e038"
+    from alephllm_diffusion.triangulate import arm_features
+    assert arm_features.reading(sessions.ARM_SURFACE, sessions.ARM_BLOCK) == sessions.ARM_READING
+    assert ax.HUB_FEATURES[sessions.ARM_READING] == "beatrix/" + arm_features.file_name(sessions.ARM_SURFACE,
+                                                                                 sessions.ARM_BLOCK)
 
 
 def test_only_the_first_three_sessions_need_the_reference_data(monkeypatch):
@@ -43,6 +53,7 @@ def test_only_the_first_three_sessions_need_the_reference_data(monkeypatch):
     monkeypatch.setattr(storage, "check_reference", lambda: pytest.fail("session 4 checked the reference data"))
     s.reference(4)                                        # the hub sliders start without sessions 1-3's inputs
     s.reference(5)                                        # so does session 5
+    s.reference(6)                                        # and session 6
     for n in sessions.REFERENCE_SESSIONS:
         with pytest.raises(sessions.StepFailed, match="reference data missing"):
             s.reference(n)

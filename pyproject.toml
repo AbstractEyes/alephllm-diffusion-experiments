@@ -15,9 +15,9 @@ keywords = ["alephllm", "beatrix", "anima", "diffusion", "conditioning", "adapte
 # Compatible ranges for the package itself. The exact, tested environment is requirements.txt.
 # torch is deliberately absent: it comes from PyTorch's CUDA wheel index (requirements.txt), never from PyPI.
 dependencies = [
-    "geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@4da43e75e002670e659126f838225d6795fb4308",
+    "geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@9f555f6fa2c5ce52290e5ee5a2a12706646abdf6",
     "amoe-lora @ git+https://github.com/AbstractEyes/amoe-lora@9e95a0a4d402405b83daba2819350073ca2ae3ca",
-    "geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@4ab9c83903e427e415a3c62688fa6a7f904ba273",
+    "geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@4d1867fd084aa36112edd9ce65503d520b674721",
     "transformers>=4.57,<5",
     "huggingface_hub>=0.36,<1",
     "diffusers>=0.35",
