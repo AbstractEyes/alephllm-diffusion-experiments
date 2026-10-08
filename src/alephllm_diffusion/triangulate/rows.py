@@ -9,49 +9,19 @@ closes it:
                                above 0x80 a two-byte stand-in. For ASCII text the spelling differs from the raw bytes only at the
                                spaces: ' taco' is the one token 'Ġtaco', six bytes against five. The token closes at the first byte
                                of the next token's spelling.
-The two forms are tied by a round trip: the spelling read back through the map must give the caption's bytes exactly (asserted).
-Rows leave out the caption's first token (Qwen's first position is its attention sink, an outlier state) and its last (no byte
-follows it in A). Nothing runs on import."""
-from dataclasses import dataclass
-from itertools import accumulate
-
-
-def char_to_byte() -> dict:
-    """GPT-2's byte-level map read backwards: stand-in character -> byte (the printable bytes stand for themselves; the other 68
-    take the characters from U+0100 on, in byte order)."""
-    bs = list(range(ord("!"), ord("~") + 1)) + list(range(ord("\xa1"), ord("\xac") + 1)) + list(range(ord("\xae"), ord("\xff") + 1))
-    cs = bs[:]
-    n = 0
-    for b in range(256):
-        if b not in bs:
-            bs.append(b)
-            cs.append(256 + n)
-            n += 1
-    return {chr(c): b for c, b in zip(cs, bs)}
-
-
-_C2B = char_to_byte()
-
-
-@dataclass(frozen=True)
-class Caption:
-    text: str
-    ids: tuple            # Qwen3 token ids (Anima's call: no special tokens)
-    raw: bytes            # A: what she reads
-    spelled: bytes        # B: what she reads
-    a_end: tuple          # per token: the byte after its expansion in `raw` (its closing byte; len(raw) for the last)
-    b_end: tuple          # per token: the byte after its spelling in `spelled`
+The two forms are tied by a round trip: the spelling read back through the map must give the caption's bytes exactly.
+THE RENDERER is the library's (geolip.alephllm.train.surface.spell, the GPT-2 byte-level convention): the instrument, the surface
+arms it reads and their training share one spelling. It replaced this module's own copy (identical byte for byte on both caption
+draws, 4,096 captions; tests/test_triangulate.py keeps the old copy as the reference). A text without an exact spelling raises
+ValueError. Rows leave out the caption's first token (Qwen's first position is its attention sink, an outlier state) and its last
+(no byte follows it in A). Nothing runs on import."""
+from geolip.alephllm.train.surface import Spelled as Caption  # noqa: F401  (the row type: text, ids, raw, spelled, a_end, b_end)
+from geolip.alephllm.train.surface import char_to_byte, spell  # noqa: F401
 
 
 def caption(tok, text: str) -> Caption:
-    ids = tok(text, add_special_tokens=False)["input_ids"]
-    pieces = tok.convert_ids_to_tokens(ids)
-    expansions = [bytes(_C2B[c] for c in p) for p in pieces]
-    raw = text.encode("utf-8")
-    assert b"".join(expansions) == raw, f"the tokens' byte expansions do not give the caption back: {text!r}"
-    spellings = [p.encode("utf-8") for p in pieces]
-    return Caption(text, tuple(ids), raw, b"".join(spellings), tuple(accumulate(len(e) for e in expansions)),
-                   tuple(accumulate(len(s) for s in spellings)))
+    """the caption's two byte forms and each token's closing byte on both, by the library's renderer."""
+    return spell(tok, text, convention="gpt2")
 
 
 def token_positions(c: Caption) -> list:

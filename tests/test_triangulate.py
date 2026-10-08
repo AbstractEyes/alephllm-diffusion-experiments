@@ -48,6 +48,59 @@ def test_the_byte_map_is_gpt2s():
     assert sorted(m.values()) == list(range(256)) and m["Ġ"] == 0x20 and m["Ċ"] == 0x0A and m["a"] == ord("a")
 
 
+def _old_caption(tok, text):
+    """the instrument's own renderer before it moved to the library's (alephllm-diffusion-experiments 9d57056-b1fff88), kept
+    verbatim as the reference the library's must equal byte for byte"""
+    from itertools import accumulate
+
+    def c2b():
+        bs = (list(range(ord("!"), ord("~") + 1)) + list(range(ord("\xa1"), ord("\xac") + 1))
+              + list(range(ord("\xae"), ord("\xff") + 1)))
+        cs = bs[:]
+        n = 0
+        for b in range(256):
+            if b not in bs:
+                bs.append(b)
+                cs.append(256 + n)
+                n += 1
+        return {chr(c): b for c, b in zip(cs, bs)}
+    m = c2b()
+    ids = tok(text, add_special_tokens=False)["input_ids"]
+    pieces = tok.convert_ids_to_tokens(ids)
+    expansions = [bytes(m[c] for c in p) for p in pieces]
+    raw = text.encode("utf-8")
+    assert b"".join(expansions) == raw
+    spellings = [p.encode("utf-8") for p in pieces]
+    return (tuple(ids), raw, b"".join(spellings), tuple(accumulate(len(e) for e in expansions)),
+            tuple(accumulate(len(s) for s in spellings)))
+
+
+def _same(tok, text):
+    c = RW.caption(tok, text)
+    ids, raw, spelled, a_end, b_end = _old_caption(tok, text)
+    return (tuple(c.ids), c.raw, c.spelled, tuple(c.a_end), tuple(c.b_end)) == (ids, raw, spelled, a_end, b_end) and all(
+        RW.prefixes(c, t) == (raw[: a_end[t] + 1], spelled[: b_end[t] + 1]) for t in RW.token_positions(c))
+
+
+def test_the_librarys_renderer_is_the_instruments_byte_for_byte(tok):
+    from geolip_anima_trainer import anima_experiments as ax
+    from alephllm_diffusion.mount import read as MR
+    texts = ["a taco on a plate.", "café crème", "A clock hangs in a bathroom.\nTwo dogs run on a beach.",
+             "naïve façade — 東京, 3½ apples"] + [ax.PREFIX + MR.PREFIX_FRAME.replace("{w}", p) for _, _, p in H.ROWS]
+    assert all(_same(tok, t) for t in texts)
+
+
+def test_the_librarys_renderer_on_both_caption_draws(tok):
+    """the dual-extraction read's two COCO draws (all 2 x 2,048 captions) when the hub read's data is on this machine"""
+    import json
+    p = os.path.join(settings.DATA_DIR, "coco_caps_2x2048.json")
+    if not os.path.exists(p):
+        pytest.skip("the caption draws are not here (settings.DATA_DIR)")
+    caps = json.load(open(p, encoding="utf-8"))
+    bad = [(d, i) for d in ("draw1", "draw2") for i, t in enumerate(caps[d]) if not _same(tok, t)]
+    assert sum(len(caps[d]) for d in ("draw1", "draw2")) == 4096 and bad == []
+
+
 def test_a_caption_spelled_and_closed(tok):
     c = RW.caption(tok, "a taco on a plate.")
     assert c.raw == b"a taco on a plate." and len(c.ids) == 6
