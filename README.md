@@ -63,12 +63,12 @@ The check exits with code 1 when anything differs from the pins.
 
 The experiments run in sessions on one card. On Colab, open
 [`notebooks/colab_sessions.ipynb`](notebooks/colab_sessions.ipynb)
-([open it in Colab](https://colab.research.google.com/github/AbstractEyes/alephllm-diffusion-experiments/blob/v0.3.1/notebooks/colab_sessions.ipynb)):
+([open it in Colab](https://colab.research.google.com/github/AbstractEyes/alephllm-diffusion-experiments/blob/v0.3.2/notebooks/colab_sessions.ipynb)):
 cell 1 installs this package, cell 2 runs a session, and cell 3 shows what is done. Anywhere else, after the install above:
 
 ```python
 from alephllm_diffusion import sessions
-sessions.run(1)        # then 2, then 3; 4 and 5 each on its own; running a session again skips the steps already done
+sessions.run(1)        # then 2, then 3; 4, 5 and 6 each on its own; running a session again skips the steps already done
 sessions.status()
 ```
 
@@ -79,6 +79,7 @@ sessions.status()
 | 3 | the picture test's stage B | 1-1.5 h |
 | 4 | the hub sliders: Beatrix's slider features at three readings (her stream at a phrase's closing stop, her hub's blackboard, both), then seven slider arms trained by Anima's own objective and judged on held-out scenes | 1.5-2.5 h |
 | 5 | the slider at the dual-extraction read's pick (her stream at block 20): its features, then three slider arms (the neutral phrases kept off both sides of the slider in training, its untrained control, the same reading with session 4's recipe) | 1-1.5 h |
+| 6 | the slider read through Beatrix's Qwen tokenizer arm (her stream at block 20, each phrase in the image model's caption form): its features through the arm, with the arm masked and on an untrained copy with its own arm, then three slider arms in session 5's form (her reading through the arm, its untrained control, her plain reading with the same arms mounted) | 1-1.5 h |
 
 Each step runs as its own process and keeps its full output in `runs/logs/`. The fixed reference inputs (stage 0's captions,
 the reference run's cell lines, the caption draws and their ruler embeddings) come from a private data repository and are
@@ -104,6 +105,8 @@ a scratch workspace (`ALEPHLLM_DIFFUSION_HOME`), without the pictures or any upl
 | `alephllm_diffusion.hubs.experiment` | the hub read as experiment e030 of the Anima experiments repo: its page and files from the read's ledger, published with the Anima trainer's own step |
 | `alephllm_diffusion.triangulate.rows`, `align`, `read` | the dual-extraction read: Beatrix's trunk and hub on two byte forms of a caption (its own bytes; Qwen3's spelling of its tokens), per Qwen3 token, against the Qwen3 states Anima reads, with the mood directions mapped |
 | `alephllm_diffusion.triangulate.experiment` | that read as experiment e038 of the Anima experiments repo |
+| `alephllm_diffusion.triangulate.arm_read`, `arm_experiment` | the same read on a mounted surface arm (Beatrix reading a tokenizer's spelling through an arm trained to read it as her own bytes), with its decisions, as experiment e045 |
+| `alephllm_diffusion.triangulate.arm_features` | the slider arms' features read through a surface arm (through the arm, the arm masked, an untrained copy with its own arm) |
 | `alephllm_diffusion.sessions` | the session runner |
 | `alephllm_diffusion.settings`, `storage`, `models` | where files live, the private data store, the public model downloads |
 

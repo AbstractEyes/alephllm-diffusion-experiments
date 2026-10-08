@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "alephllm-diffusion-experiments"
-version = "0.3.1"
+version = "0.3.2"
 description = "Diffusion experiments for AlephLLM models: Beatrix's text states as conditioning for the Anima image model, her trained arm groups mounted, and the picture tests that read the result."
 readme = "README.md"
 requires-python = ">=3.12"
