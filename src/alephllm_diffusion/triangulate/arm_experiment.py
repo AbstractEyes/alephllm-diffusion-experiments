@@ -84,6 +84,14 @@ def findings(L) -> list:
                + ", ".join(f"{R['C6'][f'A8|{b}']['cos_axis']:+.3f}" for b in band)
                + f" and Qwen3's spelling without the arm "
                + ", ".join(f"{R['C6'][f'B8|{b}']['cos_axis']:+.3f}" for b in band) + ".")
+    if f"UBq|{blocks[0]}" in R["C1"]:
+        uq, u0 = [_a(R, "UBq", b) for b in blocks], [_a(R, "UB0", b) for b in blocks]
+        axq = [R["C6"][f"UBq|{b}"]["cos_axis"] for b in blocks]
+        dn = [R["C6"][f"UBq|{b}"]["mapped_down"][0] for b in blocks]
+        out.append(f"The untrained trunk through its own tokenizer arm stays at the untrained floor: {_span(uq)} against Qwen3's "
+                   f"final states (the untrained trunk without an arm {_span(u0)}), its mood axis {min(axq):+.3f} to "
+                   f"{max(axq):+.3f} with {min(dn)}-{max(dn)} of the 4 unseen gloomy phrases on Qwen3's gloomy side: what the arm "
+                   "reaches on her trunk is her learned reading carried across, not the arm's own.")
     sb = dec["slider_block"]
     passing = [b for b, rr in sb["rule"].items() if all(r["passes"] for r in rr)]
     out.append(f"The slider's block: {sb['block']} ({sb['why']}); the mood rule passes on both caption draws at blocks "
