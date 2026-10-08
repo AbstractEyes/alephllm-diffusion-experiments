@@ -9,4 +9,4 @@ The AlephLLM model and its arm mount come from `geolip.alephllm`; the adapters f
     python -m alephllm_diffusion.environment      # what is installed, the card, the fork's commit
 """
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"

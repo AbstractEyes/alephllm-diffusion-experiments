@@ -4,6 +4,8 @@
     sessions.run(1)      # the mount checks, the port check, stage 1 of the grid, the first 64 pictures   (about 2.5-3 h)
     sessions.run(2)      # the grids, the picks, the mount contrast, the export                         (about 4-7 h)
     sessions.run(3)      # the pictures of the relay arms                                               (about 1-1.5 h)
+    sessions.run(4)      # the hub sliders: three readings of a mood phrase, seven slider arms         (about 2-2.5 h)
+    sessions.run(5)      # the slider at the dual-extraction read's pick, neutral phrases off its sides (about 1-1.5 h)
     sessions.status()    # every step: done, or not yet
     sessions.stop()      # a running grid stops at its next cell and keeps its cells; run the session again to resume
 
@@ -46,10 +48,16 @@ E029_META = "experiments/e029_anima_relay_in_pictures/meta.json"
 # nine arms mounted (the hub read, experiment e030, decided the stream's reading and measured the other two; the arms run in
 # this order)
 HUB_READINGS = ("close/stream/18", "close/hub/22", "close/both/18")
-REFERENCE_SESSIONS = (1, 2, 3)        # the sessions that read the fixed reference data; session 4 builds its own inputs
+REFERENCE_SESSIONS = (1, 2, 3)        # the sessions that read the fixed reference data; sessions 4-5 build their own inputs
 SLIDER_ARMS = ("e031_beatrix_stream_closing_slider", "e032_beatrix_random_trunk_stream_closing_slider",
                "e033_beatrix_stream_closing_slider_nine_arms", "e034_beatrix_hub_slider", "e035_beatrix_random_trunk_hub_slider",
                "e036_beatrix_hub_and_stream_slider", "e037_beatrix_random_trunk_hub_and_stream_slider")
+# session 5, the slider on the dual-extraction read's pick (experiment e038 chose her stream at block 20): the neutral phrases
+# kept off both sides of the slider in training, on her bare trunk and an untrained copy, then the same reading with session 4's
+# recipe (the two of hers differ only there; the arms run in this order)
+PICK_READINGS = ("close/stream/20",)
+PICK_ARMS = ("e039_beatrix_block20_slider_neutral_off", "e040_beatrix_random_trunk_block20_slider_neutral_off",
+             "e041_beatrix_block20_slider")
 
 
 class StepFailed(RuntimeError):
@@ -91,12 +99,18 @@ STEPS = (
                             "her hub, both) on her bare trunk, with the nine arms and untrained; to the public data repo", 10),
     Step("hub_sliders", 4, "the slider arms: seven pushes trained by Anima's own objective and judged on the held-out scenes "
                            "(about 1,600 pictures; the render batch timed first)", 140, smoke=False),
+    Step("pick_features", 5, "Beatrix's slider features at the dual-extraction read's pick (her stream at the closing stop, "
+                             "block 20) on her bare trunk, with the nine arms and untrained; to the public data repo", 5),
+    Step("pick_sliders", 5, "the slider arms: her reading with the neutral phrases kept off both sides in training, its "
+                            "untrained control, and her reading with session 4's recipe (about 700 pictures; the render batch "
+                            "timed first)", 70, smoke=False),
 )
 RESTORE = {                           # fetched at a session's start when missing (globs relative to the workspace)
     1: ["markers/*.json", "reports/*", "mount_read/*", "out/s1_*.pt"],
     2: ["markers/*.json", "reports/*", "mount_read/*", "out/s1_*.pt", "out/stitch_*.json", "out/stitch_*_percaption.pt"],
     3: ["markers/*.json", "reports/*", "out/e029_export_*"],
     4: ["markers/*.json", "reports/*"],
+    5: ["markers/*.json", "reports/*"],
 }
 SAVE = {                              # sent to the data store at a session's end
     1: ["markers/*.json", "logs/*", "reports/*", "reports/env/*", "mount_read/*", "out/s1_*.pt",
@@ -105,6 +119,7 @@ SAVE = {                              # sent to the data store at a session's en
         "out/e029_export_*"],
     3: ["markers/*.json", "logs/*", "reports/*"],
     4: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
+    5: ["markers/*.json", "logs/*", "reports/*", "out/mood_phrases_*"],
 }
 GRID_FILES = ["out/stitch_*_cells_*/*", "out/stitch_*.json", "out/stitch_*_percaption.pt", "logs/*.log"]
 CHECKPOINT = {"stage1": ["out/s1_*.pt", "logs/*.log"], "grid_record": GRID_FILES, "grid_mounts": GRID_FILES}
@@ -492,21 +507,35 @@ class _Session:
         self.pictures("B", "--export", export)
         self.mark("pictures_b", form=form, export=os.path.basename(export))
 
-    def do_hub_features(self):
-        args = [",".join(HUB_READINGS)] + ([] if self.smoke else ["--upload=1"])
-        self.sh("hub_features", "alephllm_diffusion.hubs.features", *args, env={"HF_TOKEN": "" if self.smoke else self.token()})
-        files = [f"mood_phrases_{r.replace('/', '-')}_mini-beatrix-3_step{STEP}.safetensors" for r in HUB_READINGS]
+    def slider_features(self, step: str, readings) -> None:
+        """A sliders session's features files (hubs.features), uploaded to the public data repo the arms read them from."""
+        args = [",".join(readings)] + ([] if self.smoke else ["--upload=1"])
+        self.sh(step, "alephllm_diffusion.hubs.features", *args, env={"HF_TOKEN": "" if self.smoke else self.token()})
+        files = [f"mood_phrases_{r.replace('/', '-')}_mini-beatrix-3_step{STEP}.safetensors" for r in readings]
         missing = [f for f in files if not os.path.exists(os.path.join(settings.OUT_DIR, f))]
         if missing:
-            raise StepFailed(f"the features step wrote no {missing} (logs/hub_features.log)")
-        self.mark("hub_features", files=files, uploaded=not self.smoke)
+            raise StepFailed(f"the features step wrote no {missing} (logs/{step}.log)")
+        self.mark(step, files=files, uploaded=not self.smoke)
 
-    def do_hub_sliders(self):
+    def slider_arms(self, step: str, arms) -> None:
+        """A sliders session's arms, in order, by the Anima trainer's connector runner."""
         env = {"HF_TOKEN": self.token(), "HF_HOME": os.path.join(settings.ANIMA_DATA, "hf_cache"),
                "ANIMA_DIFFUSION_PIPE": settings.DP, "OMP_NUM_THREADS": "8"}
-        self.sh("hub_sliders", "geolip_anima_trainer.connectors_run", "--arms", ",".join(SLIDER_ARMS), "--data-root",
+        self.sh(step, "geolip_anima_trainer.connectors_run", "--arms", ",".join(arms), "--data-root",
                 settings.ANIMA_DATA, "--models-dir", settings.MODELS_DIR, "--eval-batch", "auto", env=env)
-        self.mark("hub_sliders", arms=list(SLIDER_ARMS))
+        self.mark(step, arms=list(arms))
+
+    def do_hub_features(self):
+        self.slider_features("hub_features", HUB_READINGS)
+
+    def do_hub_sliders(self):
+        self.slider_arms("hub_sliders", SLIDER_ARMS)
+
+    def do_pick_features(self):
+        self.slider_features("pick_features", PICK_READINGS)
+
+    def do_pick_sliders(self):
+        self.slider_arms("pick_sliders", PICK_ARMS)
 
     # ------------------------------------------------------------------ the session
     def start(self, session: int, steps: list) -> None:
@@ -544,7 +573,7 @@ class _Session:
 
     def reference(self, session: int) -> None:
         """The fixed reference inputs of the sessions that read them (REFERENCE_SESSIONS): fetched from the data store, or
-        required on disk when it is off, and checked against their recorded SHA-256. Session 4 reads none."""
+        required on disk when it is off, and checked against their recorded SHA-256. Sessions 4 and 5 read none."""
         if session not in REFERENCE_SESSIONS:
             return
         from . import storage
@@ -569,12 +598,12 @@ def _session_steps(session: int) -> list:
 
 def run(session: int, smoke: bool = False, store: bool | None = None, card_fraction: float | None = None,
         ram_gb: float | None = None, card_free_mib: int = 2000, verbose: bool = False) -> bool:
-    """Run session 1, 2, 3 or 4: every step not yet done, in order; True when the session completes. store: the private data store
+    """Run session 1, 2, 3, 4 or 5: every step not yet done, in order; True when the session completes. store: the private data store
     (default: on, off in a smoke run). card_fraction / ram_gb: the card's per-process memory fraction and the grid's host-memory
     budget (defaults from the machine). card_free_mib: a step starts only while the card holds at most this much (one card, one
     job). verbose: every output line of every step."""
     steps = _session_steps(session)
-    assert steps, f"there is no session {session} (1, 2, 3 or 4)"
+    assert steps, f"there is no session {session} (1, 2, 3, 4 or 5)"
     s = _Session(smoke, (not smoke) if store is None else store, card_fraction, ram_gb, card_free_mib, verbose)
     t_all = time.time()
     try:
@@ -692,11 +721,12 @@ def summary(session: int, smoke: bool = False) -> None:
         print(f"the export: {[f for f in ex if f.endswith('.safetensors')]}")
     elif session == 3:
         print(f"the pictures and their reads: {EXPERIMENTS_REPO}, {os.path.dirname(E029_META)}")
-    elif session == 4:
-        for arm in SLIDER_ARMS:
+    elif session in (4, 5):
+        arms = SLIDER_ARMS if session == 4 else PICK_ARMS
+        for arm in arms:
             m = load(settings.ANIMA_DATA, "experiments", arm, "result.json")
             if m and m.get("reads"):
                 r = m["reads"]
                 print(f"{arm.split('_')[0]}: {r.get('TRAINED')}; {r.get('HELD_OUT', '')}; {r.get('NEUTRAL', '')} (held-out "
                       f"effect {r.get('heldout_effect', float('nan')):+.3f})")
-        print(f"the pictures and their reads: {EXPERIMENTS_REPO}, experiments/{SLIDER_ARMS[0][:4]}-{SLIDER_ARMS[-1][:4]}")
+        print(f"the pictures and their reads: {EXPERIMENTS_REPO}, experiments/{arms[0][:4]}-{arms[-1][:4]}")

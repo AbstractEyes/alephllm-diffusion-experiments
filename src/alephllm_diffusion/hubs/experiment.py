@@ -20,7 +20,7 @@ EXPERIMENT_ID = ax.HUB_READ_ID
 TITLE = "Beatrix's hubs against her stream as features for the sliders (a read of her states; no pictures)"
 KIND = "beatrix_read"
 CODE_URL = "https://github.com/AbstractEyes/alephllm-diffusion-experiments"
-READINGS = tuple(ax.HUB_FEATURES)                       # the three readings the hub sliders use
+READINGS = ("close/stream/18", "close/hub/22", "close/both/18")   # the three readings the hub sliders (e031-e037) use
 CONDITIONS = (("M0", "bare"), ("M9_A", "nine arms A"), ("M9_B", "nine arms B"), ("M8_A", "eight arms A"),
               ("M8_B", "eight arms B"), ("Mc_A", "caption arm A"), ("Mc_B", "caption arm B"), ("U0", "untrained"),
               ("A212", "step 212,000"))
@@ -283,7 +283,10 @@ def _phrase_table() -> dict:
 
 
 def hub_arms() -> list:
-    return [a for a in ax.CONNECTOR_ARMS if a.features in ax.HUB_FEATURES.values()]
+    """The hub sliders: the arms on the readings this read chose and measured (later arms on other readings name their own
+    read)."""
+    files = {ax.HUB_FEATURES[r] for r in READINGS}
+    return [a for a in ax.CONNECTOR_ARMS if a.features in files]
 
 
 def _reading_of(arm) -> str:
