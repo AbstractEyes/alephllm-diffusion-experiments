@@ -17,7 +17,7 @@ keywords = ["alephllm", "beatrix", "anima", "diffusion", "conditioning", "adapte
 dependencies = [
     "geolip-alephllm @ git+https://github.com/AbstractEyes/alephllm@9f555f6fa2c5ce52290e5ee5a2a12706646abdf6",
     "amoe-lora @ git+https://github.com/AbstractEyes/amoe-lora@9e95a0a4d402405b83daba2819350073ca2ae3ca",
-    "geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@4d1867fd084aa36112edd9ce65503d520b674721",
+    "geolip-anima-trainer @ git+https://github.com/AbstractEyes/anima-trainer@17a591ee9e811a731b27893d71cb48f0991d45e0",
     "transformers>=4.57,<5",
     "huggingface_hub>=0.36,<1",
     "diffusers>=0.35",
