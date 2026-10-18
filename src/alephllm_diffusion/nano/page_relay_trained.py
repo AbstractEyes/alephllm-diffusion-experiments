@@ -37,7 +37,7 @@ def to_safetensors(src_dir: str, out_dir: str) -> dict:
     for fn in sorted(os.listdir(src_dir)):
         if not fn.endswith(".pt"):
             continue
-        obj = torch.load(os.path.join(src_dir, fn), weights_only=False)
+        obj = torch.load(os.path.join(src_dir, fn), weights_only=False, map_location="cpu")
         base = fn[:-3]
         if base.endswith("_ridge"):
             t = {k: obj[k].contiguous() for k in ("W", "mx", "my")}
