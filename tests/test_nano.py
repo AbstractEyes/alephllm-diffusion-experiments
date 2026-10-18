@@ -74,6 +74,13 @@ def test_the_evaluated_sets_are_the_records_fourteen():
     assert sum(v[0] == "neutral" for v in s.values()) == 2
 
 
+def test_the_second_form_takes_the_neutral_push_off_both_sides():
+    D = {"up": torch.tensor([3.0, 1.0]), "down": torch.tensor([1.0, 3.0]), "neutral": torch.tensor([1.0, 1.0])}
+    out = NC.neutral_relative(D)
+    assert set(out) == {"up", "down"} and torch.equal(out["up"], torch.tensor([2.0, 0.0]))
+    assert torch.equal(out["down"], torch.tensor([0.0, 2.0]))
+
+
 def test_the_slot_mean_ignores_padding():
     ctx = torch.tensor([[[1.0, 1.0], [3.0, 3.0], [100.0, 100.0]]])
     assert torch.equal(NC.slot_mean(ctx, torch.tensor([[1, 1, 0]])), torch.tensor([[2.0, 2.0]]))

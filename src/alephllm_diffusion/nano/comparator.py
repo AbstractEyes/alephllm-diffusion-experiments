@@ -30,8 +30,8 @@ def slot_mean(ctx: torch.Tensor, mask: torch.Tensor) -> torch.Tensor:
 
 @torch.no_grad()
 def anima_directions(pipe, scenes: list, phrases: dict, template: str, neutral: str, batch: int = 32) -> dict:
-    """{'up': D_up, 'down': D_down} (float32 [1024] on the CPU) from AnimaPipe's encode + adapt; phrases {'up': [...], 'down':
-    [...]} are the training phrases only and scenes the training scenes only (the evaluated cells never enter)."""
+    """{side: D_side} (float32 [1024] on the CPU) for every side of phrases ({'up': [...], 'down': [...], 'neutral': [...]}) from
+    AnimaPipe's encode + adapt: the training phrases only and the training scenes only (the evaluated cells never enter)."""
     def means(prompts):
         out = []
         for i in range(0, len(prompts), batch):
@@ -41,10 +41,15 @@ def anima_directions(pipe, scenes: list, phrases: dict, template: str, neutral: 
 
     neu = means([neutral.format(s=s) for s in scenes])
     out = {}
-    for side in ("up", "down"):
-        M = means([template.format(s=s, p=w) for s in scenes for w in phrases[side]]).view(len(scenes), len(phrases[side]), -1)
+    for side, ws in phrases.items():
+        M = means([template.format(s=s, p=w) for s in scenes for w in ws]).view(len(scenes), len(ws), -1)
         out[side] = (M - neu[:, None]).mean((0, 1))
     return out
+
+
+def neutral_relative(D: dict) -> dict:
+    """the formula map's second form: each mood direction less the neutral phrases' (what appending any phrase does in common)."""
+    return {side: D[side] - D["neutral"] for side in ("up", "down")}
 
 
 def anima_push(a: float, g: float, D: dict) -> torch.Tensor:
