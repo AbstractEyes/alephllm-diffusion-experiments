@@ -172,11 +172,42 @@ def relay_page(root: str, img_dir: str, out_sheet: str, smoke: bool = False) -> 
     def path_of(i, arm):
         return os.path.join(img_dir, f"{arm}_{i}_{seeds[0]}.jpg")
 
-    sheet(list(range(min(6, n_cap))), arms, path_of, out_sheet, labels=arms)
+    sheet(list(range(min(5, n_cap))), arms, path_of, out_sheet, labels=arms)
     ident = L["_meta"]["identity"]
     useful = [a for a in arms if reads.get(a, {}).get("OUTCOME") == "USEFUL IN QWEN'S LANE" and a not in ("ceiling", "qwen_fp32")]
-    summary = ("readers useful in Qwen3's lane (above the token lookup on both judges): "
-               + (", ".join(useful) if useful else "none") + f"; the control: {reads['control']['OUTCOME'].lower()}")
+    judge_name = {"caption_score": "the caption score", "kept": "picture kept"}
+    above = {j: [a for a in arms if a in reads and a != "control" and reads[a][j]["vs_floor"] > 2 * reads[a][j]["se"]]
+             for j in judge_name}
+    blind = [j for j in judge_name if "qwen_fp32" not in above[j]]             # a judge on which Qwen3 itself does not pass
+    readers_above = {j: [a for a in above[j] if a not in ("ceiling", "qwen_fp32")] for j in judge_name}
+
+    short = {"ceiling": "Qwen3's usual path", "qwen_fp32": "Qwen3's own states", "beatrix": "Beatrix 3s", "nano": "castor -cf",
+             "stack": "the four nano bodies side by side", "births": "their untrained starts side by side"}
+
+    def said(j, a):
+        r = reads[a][j]
+        return f"{short[a]} {_f(r['vs_floor'], 4 if j == 'kept' else 2, True)} +- {_f(r['se'], 4 if j == 'kept' else 2)}"
+
+    findings = []
+    for j in blind:
+        findings.append(f"{judge_name[j]} cannot separate Qwen3's own states from the token lookup ({said(j, 'qwen_fp32')}): every "
+                        f"arm reads the caption's own T5 tokens as the adapter's queries, and they carry the caption's content into "
+                        f"every picture, so on this judge the rule of both judges can be met by no arm")
+    for j in judge_name:
+        if j in blind:
+            continue
+        ra = readers_above[j]
+        findings.append(f"on {judge_name[j]}, above the floor: " + (", ".join(said(j, a) for a in ra) if ra else "no reader")
+                        + "; at the floor: " + ", ".join(said(j, a) for a in ("nano", "stack", "births") if a in reads and a not in ra))
+    gap = {a: reads[a]["kept"]["gap_closed"] for a in ("beatrix", "nano", "stack", "births") if a in reads}
+    summary = ("the registered rule (above the token lookup on both judges) is met by no arm" if not useful else
+               "useful in Qwen3's lane: " + ", ".join(useful)) + "; " + "; ".join(findings) + (
+               f"; share of the floor-to-Qwen3 gap closed on picture kept: " + ", ".join(f"{a} {v:.2f}" for a, v in gap.items()))
+    meaning = "\n".join(f"{i + 1}. {s[0].upper()}{s[1:]}." for i, s in enumerate(findings + [
+        "a state map that tracks Qwen3's states better (the four nano bodies side by side: R2 on unseen captions "
+        f"{F['stack']['eval_r2']:.2f} against the lookup's {F['floor']['eval_r2']:.2f}) did not move the pictures toward Qwen3's; "
+        f"Beatrix's map ({F['beatrix']['eval_r2']:.2f}) did, by {gap.get('beatrix', 0):.0%} of the gap: closeness in Qwen3's own "
+        "coordinates is necessary, and the share of it that reaches the pictures is small"]))
     title = ("The relay in pictures over whole captions: Qwen3's states replaced by a mapped reading of Beatrix 3s, a nano body, "
              "the four nano bodies side by side, a lookup of the token, and the untrained nano starts")
     readme = f"""# {{rid}}: {title}
@@ -200,7 +231,10 @@ Can a small byte-level model stand in for Qwen3 as Anima's text reader? The read
 
 ![the sheet](sheet.jpg)
 
-The sheet: the first six captions at seed {seeds[0]} (rows), one column per arm in the table's order.
+The sheet: the first five captions at seed {seeds[0]} (rows), one column per arm in the table's order.
+
+## What it means
+{meaning}
 
 ## Limits
 {n_cap} captions, {len(seeds)} seeds; one linear map per reader; the first token kept from Qwen3; one judge model.
