@@ -1,0 +1,51 @@
+"""alephllm_diffusion.nano.bodies - the nano crafts and their loader.
+
+A reader is (body, version): the body is one of the four nano v1.1 crafts, the version the diet's end (step 61,422), one of its three
+continuations (frames -fr, plain control -ct, carry -cf, each at 65,237), or "birth": the body's own untrained start (the same
+architecture and the same seed, nothing trained: the control that must fail). The body's architecture and seed come from the trainer's
+own table (geolip.nano_beatrix.nano_v1.ALL), never restated here, so a body means one thing everywhere.
+
+Weights: AbstractPhil/alephllm-nano-castor-pollux <craft>/checkpoints/step_<step>.safetensors (public; read tokenless), loaded strictly
+in fp32 into geolip.alephllm's AlephLM built from geolip.nano_beatrix.bodies.craft_cfg at the crafts' context (4,096)."""
+from __future__ import annotations
+
+REPO = "AbstractPhil/alephllm-nano-castor-pollux"
+CTX = 4096
+BODIES = {"castor": "nano-castor-v1", "pollux-canon": "nano-pollux-canon-v1", "pollux-dual": "nano-pollux-dual-v1",
+          "pollux-dual-canon": "nano-pollux-dual-canon-v1"}
+VERSIONS = {"end": ("", 61422), "fr": ("-fr", 65237), "ct": ("-ct", 65237), "cf": ("-cf", 65237)}
+ORDER = ("end", "fr", "ct", "cf", "birth")
+
+
+def craft(body: str, version: str) -> tuple:
+    """(the craft's name on the Hub, its step) for a trained version."""
+    suffix, step = VERSIONS[version]
+    return f"{BODIES[body]}.1{suffix}", step
+
+
+def spec(body: str) -> dict:
+    """the trainer's own entry for the body's v1.1 craft: arm, seed, code, body text."""
+    from geolip.nano_beatrix import nano_v1
+    return dict(nano_v1.ALL[f"{BODIES[body]}.1"])
+
+
+def state(body: str, version: str, token=False) -> dict:
+    """the reader's weights (fp32, CPU): the stored checkpoint, or the birth for version 'birth'."""
+    from geolip.nano_beatrix import nano_v1
+    if version == "birth":
+        s = spec(body)
+        return nano_v1.birth_state(s["arm"], s["seed"])
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file
+    name, step = craft(body, version)
+    path = hf_hub_download(REPO, f"{name}/checkpoints/step_{step:08d}.safetensors", token=token)
+    return {k: v.float().contiguous() for k, v in load_file(path).items()}
+
+
+def build(body: str, version: str, device: str = "cuda", token=False):
+    """the reader as an eval-mode fp32 AlephLM on `device`, its weights loaded strictly (no missing or unexpected key)."""
+    from geolip.alephllm.model.alephlm import AlephLM
+    from geolip.nano_beatrix.bodies import craft_cfg
+    model = AlephLM(craft_cfg(spec(body)["arm"], CTX))
+    model.load_state_dict(state(body, version, token), strict=True)
+    return model.to(device).eval().requires_grad_(False)
