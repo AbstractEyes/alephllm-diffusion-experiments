@@ -68,3 +68,37 @@ def summary(a: torch.Tensor, a_in: torch.Tensor, cls: list, split: list, phrases
             "dead_zone": [int((a_in[td] < 0).sum()), int((a_in[td] < -0.25).sum()), int((a[hd] < -0.25).sum())],
             "neutral": {phrases[i]: float(a[i]) for i in neu},
             "a": {phrases[i]: float(a[i]) for i in range(len(cls))}}
+
+
+def _ridge_fit(X: torch.Tensor, y: torch.Tensor, rows: list, lam: float) -> tuple:
+    """(mean, std, weights, intercept) of the ridge regression of y on the rows of X standardized over those rows, in the dual
+    form (rows << features): w = Z^T (Z Z^T + lam * d * I)^-1 (y - b), b = the rows' mean of y."""
+    T = X[rows]
+    mu, sd = T.mean(0), T.std(0).clamp_min(EPS)
+    Z = (T - mu) / sd
+    t = y[rows]
+    b = t.mean()
+    alpha = torch.linalg.solve(Z @ Z.T + lam * Z.shape[1] * torch.eye(len(rows), dtype=Z.dtype), t - b)
+    return mu, sd, Z.T @ alpha, b
+
+
+def ridge_readings(F: torch.Tensor, cls: list, split: list, lam: float) -> torch.Tensor:
+    """The whitened reading: a for every row of F, the ridge regression of the side (+1 for 'up', -1 for 'down') on the features
+    standardized over the training rows, its strength lam per feature. The training sides sit near +1 / -1 and the zero point is
+    the training rows' mean, as in readings(); where readings() weighs every standardized feature alike, the fit discounts the
+    directions that vary for other reasons (the other attributes of a description, its word order): a regularized linear
+    discriminant (Hastie, Tibshirani and Friedman, The Elements of Statistical Learning, 4.3.1). A TRAINING row is read LEFT OUT
+    (its own row leaves the standardization and the fit); the rest on the full fit."""
+    X = F.double()
+    y = torch.tensor([1.0 if c == "up" else -1.0 if c == "down" else 0.0 for c in cls], dtype=torch.float64)
+    train = [i for i, s in enumerate(split) if s == "train"]
+
+    def at(x, fit):
+        mu, sd, w, b = fit
+        return ((x - mu) / sd) @ w + b
+
+    full = _ridge_fit(X, y, train, lam)
+    a = torch.empty(len(X), dtype=torch.float64)
+    for i in range(len(X)):
+        a[i] = at(X[i], _ridge_fit(X, y, [r for r in train if r != i], lam)) if split[i] == "train" else at(X[i], full)
+    return a

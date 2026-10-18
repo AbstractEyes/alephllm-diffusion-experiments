@@ -56,6 +56,31 @@ def test_a_planted_axis_is_found_and_noise_is_not():
     assert sn["loo_train"] <= 40           # left out, a noise axis reads at or below chance (it leans away from the row left out)
 
 
+def test_the_whitened_reading_discounts_what_varies_for_other_reasons():
+    """A planted axis under a strong nuisance (other attributes, larger than the axis, on their own features): the mean-difference
+    axis weighs the nuisance features alike and loses rows left out; the ridge reading finds the axis. A very strong ridge reads
+    every held-out row on the same side as the mean-difference axis (the same direction, balanced sides), and a training row is
+    read left out."""
+    g = torch.Generator().manual_seed(0)
+    cls, split, phr = _phrases(n_neu=0, hn=0)
+    n, d = len(cls), 48
+    side = torch.tensor([1.0 if c == "up" else -1.0 for c in cls], dtype=F64)
+    X = 0.3 * torch.randn(n, d, generator=g, dtype=F64)
+    X[:, :4] += torch.randn(n, 4, generator=g, dtype=F64) + side[:, None]          # the pair: a unit difference on 4 features
+    X[:, 4:] += 4.0 * torch.randn(n, 3, generator=g, dtype=F64) @ torch.randn(3, d - 4, generator=g, dtype=F64)  # nuisance
+    s_axis = NM.summary(NM.readings(X, cls, split), NM.in_sample(X, cls, split), cls, split, phr)
+    r = NM.ridge_readings(X, cls, split, 0.01)
+    s_ridge = NM.summary(r, r, cls, split, phr)
+    assert s_ridge["loo_train"] >= 55 and s_ridge["loo_train"] > s_axis["loo_train"] + 10
+    held = [i for i in range(n) if split[i] != "train"]
+    a_far, a_ax = NM.ridge_readings(X, cls, split, 1e6), NM.readings(X, cls, split)
+    assert torch.equal(torch.sign(a_far[held]), torch.sign(a_ax[held]))
+    i, rows = 0, [j for j in range(n) if split[j] == "train" and j != 0]
+    y = torch.tensor([1.0 if c == "up" else -1.0 for c in cls], dtype=F64)
+    mu, sd, w, b = NM._ridge_fit(X, y, rows, 0.01)
+    assert abs(float(r[i]) - float(((X[i] - mu) / sd) @ w + b)) < 1e-12
+
+
 def test_the_push_takes_one_side_at_a_time():
     D = {"up": torch.tensor([1.0, 0.0]), "down": torch.tensor([0.0, 1.0])}
     assert torch.equal(NC.anima_push(0.5, 2.0, D), torch.tensor([1.0, 0.0]))
