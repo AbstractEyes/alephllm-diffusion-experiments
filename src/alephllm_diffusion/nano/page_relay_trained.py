@@ -89,9 +89,9 @@ def page(root: str, img_dir: str, out_sheet: str, smoke: bool = False) -> tuple:
     t_t = "\n".join(f"- {SHORT[n]}: trained against its ridge {_f(reads[f'training|{n}']['diff'], 4, True)} +- "
                     f"{_f(reads[f'training|{n}']['se'], 4)} ({reads[f'training|{n}']['OUTCOME'].lower()})" for n in ("floor", "stack"))
     e_arms = [a for a in ("floor", "beatrix", "nano", "stack", "births") if a in E["arms"]]
-    t_e = "\n".join(f"- {SHORT[a]}: the earlier relay's linear map {kept(a, E):.4f}" + (
-        f"; here {kept(a + '|ridge'):.4f} (the ridge on this corpus)" if a + "|ridge" in P["arms"] else "")
-        + (f", {kept(a + '|s0'):.4f} (trained)" if a + "|s0" in P["arms"] else "") for a in e_arms)
+    t_e = "\n".join(f"- {SHORT[a]}: the earlier relay's linear map {kept(a, E):.4f}; here " + ", ".join(
+        f"{kept(a + '|' + k):.4f} ({w})" for k, w in (("ridge", "the ridge on this corpus"), ("s0", "trained"))
+        if a + "|" + k in P["arms"]) for a in e_arms)
     # what it means
     useful = [a for a in arms if reads.get(a, {}).get("OUTCOME") == "USEFUL WITH TRAINING" and not a.startswith("floor")]
     meaning = []
@@ -109,7 +109,12 @@ def page(root: str, img_dir: str, out_sheet: str, smoke: bool = False) -> tuple:
                                              a.split('|')[0] in ("stack", "nano", "births", "beatrix") and a.endswith("s0")))
     meaning.append(f"the untrained starts side by side: {reads['TR2'].lower()}")
     meaning.append("training's own effect over the ridge on the same corpus: " + "; ".join(
-        f"{SHORT[n]} {reads[f'training|{n}']['OUTCOME'].lower()}" for n in ("floor", "stack")))
+        f"{SHORT[n]}: {reads[f'training|{n}']['OUTCOME'].lower()}" for n in ("floor", "stack")))
+    v0 = [x for x in T["readers"]["floor"]["runs"] if x["seed"] == 0 and x["lr"] == T["readers"]["floor"]["lr"]][0]
+    v1 = [x for x in T["readers"]["floor"]["runs"] if x["seed"] == 1][0]
+    meaning.append(f"the trained lookup's two seeds, alike in context R2 ({v0['best_val_r2']:.3f} / {v1['best_val_r2']:.3f}), differ "
+                   f"by {abs(kept('floor|s0') - kept('floor|s1')):.3f} in picture kept: the sampler magnifies small differences in "
+                   f"the states, and that spread is the bar every reader had to clear ({reads['bar']:.4f})")
     meaning_md = "\n".join(f"{i + 1}. {m[0].upper()}{m[1:]}." for i, m in enumerate(meaning))
     summary = ("trained connectors through Anima's frozen text adapter: " + ("; ".join(
         f"{SHORT[a.split('|')[0]]} above the trained floor ({_f(reads[a]['gap_closed'], 2)} of the gap)" for a in useful)
