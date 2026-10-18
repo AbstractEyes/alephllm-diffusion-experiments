@@ -3,10 +3,11 @@ the ledgers, a contact sheet where pictures were made) is written from the run's
 repo, then published by the Anima trainer's step for experiments written elsewhere (the folder in one commit, then the repo
 README's index rebuilt from every folder's meta.json). The ids come from the trainer's registry, which keeps them from every other
 experiment: on the Anima repo NANO_READ_ID (the read, no pictures), NANO_RELAY_ID (the relay in pictures), NANO_COMPARATOR_ID (the
-uniform comparator); on the Sana repo its NANO_COMPARATOR_ID.
+uniform comparator), NANO_RELAY_TRAINED_ID (the trained relay); on the Sana repo its NANO_COMPARATOR_ID.
 
-Usage: python -m alephllm_diffusion.nano.experiment write <read|relay|comparator|sana> --root=<the run's folder> --mirror=<folder>
-       python -m alephllm_diffusion.nano.experiment publish <read|relay|comparator|sana> --mirror=<folder>
+Usage: python -m alephllm_diffusion.nano.experiment write <read|relay|comparator|sana|relay_trained> --root=<the run's folder>
+           --mirror=<folder>
+       python -m alephllm_diffusion.nano.experiment publish <read|relay|comparator|sana|relay_trained> --mirror=<folder>
 (publish needs HF_TOKEN with write access to the repo; the rest runs offline.)"""
 from __future__ import annotations
 
@@ -155,7 +156,8 @@ def ids() -> dict:
     from geolip_anima_trainer import anima_experiments as ax
     from geolip_anima_trainer import sana_experiments as sx
     return {"read": (ax.NANO_READ_ID, ax.DEFAULT_REPO), "relay": (ax.NANO_RELAY_ID, ax.DEFAULT_REPO),
-            "comparator": (ax.NANO_COMPARATOR_ID, ax.DEFAULT_REPO), "sana": (sx.NANO_COMPARATOR_ID, sx.DEFAULT_REPO)}
+            "comparator": (ax.NANO_COMPARATOR_ID, ax.DEFAULT_REPO), "sana": (sx.NANO_COMPARATOR_ID, sx.DEFAULT_REPO),
+            "relay_trained": (ax.NANO_RELAY_TRAINED_ID, ax.DEFAULT_REPO)}
 
 
 def write(which: str, root: str, mirror: str, e038: str, readers: str, images: dict) -> dict:
@@ -177,6 +179,10 @@ def write(which: str, root: str, mirror: str, e038: str, readers: str, images: d
     elif which == "comparator":
         from .page_comparator import page
         readme, meta, copies, files = page(root, readers, images["comparator"], sheet_path)
+    elif which == "relay_trained":
+        from .page_relay_trained import page, to_safetensors
+        readme, meta, copies, files = page(root, images["relay_trained"], sheet_path)
+        files.update(to_safetensors(os.path.join(root, "relay_train", "connectors"), os.path.join(folder, "connectors")))
     else:
         raise ValueError(which)
     readme = readme.replace("{rid}", rid).replace("{files}", _files(files))
@@ -217,7 +223,7 @@ def main(argv=None) -> int:
         raise SystemExit(__doc__)
     if pos[0] == "write":
         mt = write(pos[1], opt["root"], opt["mirror"], opt.get("e038", ""), opt.get("readers", ""),
-                   {k: opt.get(f"images_{k}", "") for k in ("sana", "relay", "comparator")})
+                   {k: opt.get(f"images_{k}", "") for k in ("sana", "relay", "comparator", "relay_trained")})
         print(f"wrote {mt['id']}: {mt['summary']}", flush=True)
     else:
         publish(pos[1], opt["mirror"])

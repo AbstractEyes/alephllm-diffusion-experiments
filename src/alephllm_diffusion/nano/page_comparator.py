@@ -8,6 +8,8 @@ from .experiment import ANIMA_LICENCE, ANIMA_REFS, CODE_URL, DATE, JUDGE, STEER_
 from .page_pictures import AMOUNT, READER_SHORT, READER_TEXT, _group
 
 ANIMA_READERS = ("qwen", "beatrix", "nano", "birth")
+SHEET_SKIP = {15: "a beach with an umbrella", 31: "an office with computers"}   # scenes with a person: some pushed pictures of
+#                                                                                 them are not fit for a public page (left off)
 FORM_TEXT = {"bare": "D_side (the side measured against the bare neutral caption)",
              "neutral_rel": "D_side - D_neutral (the side measured against a caption carrying a neutral phrase)"}
 FORM_SHORT = {"bare": "the registered form", "neutral_rel": "the second form (less the neutral push)"}
@@ -39,8 +41,10 @@ def page(root: str, readers: str, img_dir: str, out_sheet: str, gain: float = 2.
         r = L["reads"][key]
         heldout[rd] = r["HELD_OUT"]
         g_rows.append(f"| {READER_SHORT[rd]} | {_group(r, 'heldout_up')} | {_group(r, 'heldout_down')} | "
-                      f"{_f(r['groups']['neutral']['mean'], 2, True)} | {r['HELD_OUT'].lower()}; {(r['NEUTRAL'] or '-').lower()} |")
-    t_g = "| reader | unseen cheerful | unseen gloomy | neutral | verdicts |\n|---|---|---|---|---|\n" + "\n".join(g_rows)
+                      f"{_f(r['groups']['neutral']['mean'], 2, True)} | {_f(r['heldout_effect'], 2, True)} | "
+                      f"{r['HELD_OUT'].lower()}; {(r['NEUTRAL'] or '-').lower()} |")
+    t_g = ("| reader | unseen cheerful | unseen gloomy | neutral | sides apart (half cheerful minus gloomy) | verdicts |\n"
+           "|---|---|---|---|---|---|\n" + "\n".join(g_rows))
     ctl = L["reads"].get(f"G{gain:g}|control", {})
     cells = M["cells"]
     seed0 = cells[0][1]
@@ -58,10 +62,51 @@ def page(root: str, readers: str, img_dir: str, out_sheet: str, gain: float = 2.
         i = R["phrases"].index(b)
         return os.path.join(img_dir, f"G{gain:g}_{a}_{R['cls'][i]}_{i}_{si}_{seed0}.jpg")
 
-    sheet(scenes[:8], cols, path_of, out_sheet, labels=labels)
-    summary = (f"the directions alone at s = 2: {gates['bare']} ({FORM_SHORT['bare']}), {gates['neutral_rel']} "
-               f"({FORM_SHORT['neutral_rel']}); the readers at g = {gain:g} on {FORM_SHORT[gf]}: "
-               + "; ".join(f"{READER_SHORT[rd]} {v.lower()}" for rd, v in heldout.items()))
+    shown = [si for si in scenes if si not in SHEET_SKIP]
+    sheet(shown, cols, path_of, out_sheet, labels=labels)
+    # what it means, from the ledger: a reader's amount can carry only a side the fixed direction moves by itself
+    word = {"up": "cheerful", "down": "gloomy"}
+    moving = {f: [sd for sd in ("up", "down") if S.get(f"R|{f}|{sd}|s2", {}).get("OUTCOME") == "MOVES IT"] for f in FORM_TEXT}
+
+    def sides(lst):
+        return "the " + " and ".join(word[x] for x in lst) + (" sides" if len(lst) > 1 else " side") if lst else "neither side"
+
+    meaning = [f"At s = 2, {FORM_SHORT['bare']} moves the pictures on {sides(moving['bare'])}, {FORM_SHORT['neutral_rel']} on "
+               f"{sides(moving['neutral_rel'])}: appending a phrase moves Anima's context one shared way, and that shared part "
+               f"is where the two forms differ"]
+    live = moving[gf]
+    dead = [sd for sd in ("up", "down") if sd not in live]
+    if len(live) == 1:
+        lv, dd = live[0], dead[0]
+        meaning.append(f"Stage G read {FORM_SHORT[gf]}, whose {word[dd]} direction does not move the pictures by itself: a "
+                       f"{word[dd]} phrase read on its own side leaves its picture as it was, while any phrase read on the {word[lv]} "
+                       f"side is pushed along the {word[lv]} direction, which moves; so the unseen {word[lv]} column shows how far "
+                       f"a reader carries those phrases, and the unseen {word[dd]} column shows readings of the wrong sign")
+    elif not live:
+        meaning.append(f"Stage G read {FORM_SHORT[gf]}, neither of whose directions moves the pictures by itself: no reader can be "
+                       f"read there")
+    G = {rd: L["reads"][f"G{gain:g}|{rd}"] for rd in ANIMA_READERS if f"G{gain:g}|{rd}" in L["reads"]}
+    if G:
+        meaning.append(f"The effects at g = {gain:g} (unseen cheerful / unseen gloomy / neutral phrases): " + "; ".join(
+            f"{READER_SHORT[rd]} {_f(r['groups']['heldout_up']['mean'], 2, True)} / {_f(r['groups']['heldout_down']['mean'], 2, True)}"
+            f" / {_f(r['groups']['neutral']['mean'], 2, True)}" for rd, r in G.items()))
+        sep = {rd: (r["heldout_effect"], 0.5 * (r["groups"]["heldout_up"]["se"] ** 2 + r["groups"]["heldout_down"]["se"] ** 2) ** 0.5)
+               for rd, r in G.items()}
+        meaning.append("How far a reader's amounts put the two sides apart (half the unseen cheerful effect minus the unseen gloomy "
+                       "one): " + "; ".join(f"{READER_SHORT[rd]} {_f(v, 2, True)} +- {_f(se, 2)}" for rd, (v, se) in sep.items()))
+        wrong = [rd for rd, r in G.items() if r["groups"]["heldout_down"]["mean"] > 2 * r["groups"]["heldout_down"]["se"]]
+        if wrong:
+            meaning.append("Pushed the unseen gloomy phrases toward cheerful (their readings put those phrases on the cheerful side): "
+                           + ", ".join(READER_SHORT[rd] for rd in wrong))
+        if "nano" in sep and "birth" in sep:
+            v, se = sep["nano"]
+            meaning.append(f"The control read (the untrained start against the nano reader): {str(ctl.get('OUTCOME', '-')).lower()}"
+                           + ("; the nano reader's own separation is within 2 standard errors of zero, so this read decides "
+                              "nothing" if abs(v) <= 2 * se else ""))
+    meaning_md = "\n".join(f"{i + 1}. {m}." for i, m in enumerate(meaning))
+    summary = (f"the directions alone at s = 2: {FORM_SHORT['bare']} moves {sides(moving['bare'])}, {FORM_SHORT['neutral_rel']} "
+               f"{sides(moving['neutral_rel'])}; the readers at g = {gain:g} on {FORM_SHORT[gf]}, how far their amounts put the "
+               f"unseen sides apart: " + "; ".join(f"{READER_SHORT[rd]} {_f(r['heldout_effect'], 2, True)}" for rd, r in G.items()))
     title = ("The uniform comparator on Anima: two fixed mood directions from Anima's own prepared conditioning, each reader "
              "setting only the amount (Qwen3, Beatrix 3s, a nano body, an untrained start)")
     readers_line = "; ".join(READER_TEXT[rd] for rd in ANIMA_READERS)
@@ -82,7 +127,7 @@ The mood sliders of this repo (e039-e044) learned a push direction from Anima's 
 
 ## Result
 
-**The directions alone** (at s = 2: {FORM_SHORT['bare']} {gates['bare']}; {FORM_SHORT['neutral_rel']} {gates['neutral_rel']}; stage G read {FORM_SHORT[gf]}):
+**The directions alone** (the gate, both sides at s = 2: {FORM_SHORT['bare']}: {gates['bare']}; {FORM_SHORT['neutral_rel']}: {gates['neutral_rel']}; stage G read {FORM_SHORT[gf]}):
 
 {t_r}
 
@@ -94,7 +139,10 @@ The control read (the untrained start against the nano reader): {str(ctl.get('OU
 
 ![the sheet](sheet.jpg)
 
-The sheet: the held-out scenes at seed {seed0} (rows): the unpushed picture, the stage-G directions alone at s = 2, then for each reader the unseen phrases "{up_p}" and "{dn_p}".
+The sheet: {len(shown)} of the {len(scenes)} held-out scenes at seed {seed0} (rows; {' and '.join(f'"{SHEET_SKIP[si]}"' for si in scenes if si in SHEET_SKIP)} are left off, as some pushed pictures of their figures are not fit for a public page; every number above counts them): the unpushed picture, the stage-G directions alone at s = 2, then for each reader the unseen phrases "{up_p}" and "{dn_p}".
+
+## What it means
+{meaning_md}
 
 ## Limits
 16 cells; one gain in stage G; one judge model; directions from 24 scenes and the slider experiments' phrases; the amounts are linear readings of one state per phrase.
