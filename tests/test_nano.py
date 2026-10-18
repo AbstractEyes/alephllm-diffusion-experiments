@@ -123,3 +123,81 @@ def test_the_relay_map_recovers_a_planted_linear_map():
     Y = X @ W + 3.0 + 0.01 * torch.randn(400, 5, generator=g, dtype=F64)
     m = NR.fit(X, Y, torch.arange(400) // 4)
     assert m["cv_r2"] > 0.99 and float((NR.apply(m, X[:10]).double() - Y[:10]).abs().max()) < 0.1
+
+
+class _ToyAdapter(torch.nn.Module):
+    """the adapter's call on a small scale: T5 ids as queries, one head of attention over the masked source states."""
+
+    def __init__(self, d=8, vocab=20, seed=0):
+        super().__init__()
+        g = torch.Generator().manual_seed(seed)
+        self.emb = torch.nn.Parameter(torch.randn(vocab, d, generator=g))
+        self.wk = torch.nn.Parameter(torch.randn(d, d, generator=g) / d ** 0.5)
+        self.wv = torch.nn.Parameter(torch.randn(d, d, generator=g) / d ** 0.5)
+
+    def forward(self, source_hidden_states, target_input_ids, target_attention_mask=None, source_attention_mask=None):
+        q, h = self.emb[target_input_ids], source_hidden_states
+        s = q @ (h @ self.wk).transpose(1, 2) / q.shape[-1] ** 0.5
+        s = s.masked_fill(~source_attention_mask.bool()[:, None, :], float("-inf"))
+        return torch.softmax(s, -1) @ (h @ self.wv)
+
+
+def _toy_relay(n_cap=240, p=6, d=8, seed=0):
+    """captions of 4-8 reader rows; Qwen3's states a saturating function of the reader's (what a ridge cannot fit); targets =
+    the toy adapter's output from Qwen3's own states, the first token a fixed state of its own."""
+    from alephllm_diffusion.nano import relay as NR
+    from alephllm_diffusion.nano import relay_train as RT
+    g = torch.Generator().manual_seed(seed)
+    ns = torch.randint(4, 9, (n_cap,), generator=g).tolist()
+    offs = RT.offsets(ns)
+    X = torch.randn(offs[-1], p, generator=g)
+    A = torch.randn(p, d, generator=g)
+    Q = 2.0 * torch.tanh(X @ A) + 0.5
+    first = torch.randn(n_cap, d, generator=g)
+    t5 = [torch.randint(0, 20, (int(k),), generator=g) for k in torch.randint(3, 7, (n_cap,), generator=g)]
+    ad = _ToyAdapter(d).requires_grad_(False)
+    tgt = []
+    for i in range(n_cap):
+        src = torch.cat([first[i][None], Q[offs[i]:offs[i + 1]]])[None]
+        tgt.append(ad(src, t5[i][None], None, torch.ones(1, len(src[0]), dtype=torch.long))[0])
+    tr = list(range(n_cap * 3 // 4))
+    rows = torch.cat([torch.arange(offs[i], offs[i + 1]) for i in tr])
+    groups = torch.cat([torch.full((ns[i],), i) for i in tr])
+    ridge = NR.fit(X[rows].double(), Q[rows].double(), groups)
+    data = {"X": X, "offs": offs, "first": first, "t5": t5, "tgt": tgt, "Q": Q, "Q_mean": Q[rows].mean(0),
+            "m": torch.cat([tgt[i] for i in tr]).mean(0)}
+    return data, ridge, ad, tr, list(range(len(tr), n_cap))
+
+
+def test_the_trained_relay_is_born_at_the_ridge():
+    from alephllm_diffusion.nano import relay as NR
+    from alephllm_diffusion.nano import relay_train as RT
+    data, ridge, *_ = _toy_relay()
+    conn = RT.Connector(ridge, hidden=16, seed=3)
+    x = data["X"][:50]
+    with torch.no_grad():
+        assert float((conn(x).double() - NR.apply(ridge, x).double()).abs().max()) < 1e-5
+
+
+def test_the_trained_relay_scores_only_real_slots_and_keeps_the_first_token():
+    from alephllm_diffusion.nano import relay_train as RT
+    data, ridge, ad, *_ = _toy_relay()
+    conn = RT.Connector(ridge, hidden=16)
+    src, mask = RT.source(conn, data, [0, 1])
+    n0 = data["offs"][1] - data["offs"][0]
+    assert torch.equal(src[0, 0], data["first"][0]) and int(mask[0].sum()) == n0 + 1
+    with torch.no_grad():
+        both = RT.batch_sums(conn, ad, data, [0, 1])
+        apart = [RT.batch_sums(conn, ad, data, [i]) for i in (0, 1)]
+    for k in (0, 1):                                  # padded source rows and padded T5 slots add nothing
+        assert abs(float(both[k]) - float(apart[0][k] + apart[1][k])) < 1e-4 * float(both[k])
+
+
+def test_the_trained_relay_learns_where_the_ridge_stops():
+    from alephllm_diffusion.nano import relay_train as RT
+    data, ridge, ad, tr, va = _toy_relay()
+    conn = RT.Connector(ridge, hidden=32, seed=0)
+    rec = RT.train(conn, ad, data, tr, va, steps=300, lr=3e-3, batch=32, seed=0, eval_every=100, log=lambda *_: None)
+    assert rec["best_val_r2"] > rec["born_val_r2"] + 0.02, rec
+    assert abs(RT.score(conn, ad, data, va) - rec["best_val_r2"]) < 1e-9
+    assert RT.state_r2(conn, data, va) > 0.0

@@ -8,8 +8,8 @@ from .experiment import ANIMA_LICENCE, ANIMA_REFS, CODE_URL, DATE, JUDGE, STEER_
 from .page_pictures import AMOUNT, READER_SHORT, READER_TEXT, _group
 
 ANIMA_READERS = ("qwen", "beatrix", "nano", "birth")
-FORM_TEXT = {"bare": "D_side, against the bare neutral caption",
-             "neutral_rel": "D_side - D_neutral, against a caption carrying a neutral phrase"}
+FORM_TEXT = {"bare": "D_side (the side measured against the bare neutral caption)",
+             "neutral_rel": "D_side - D_neutral (the side measured against a caption carrying a neutral phrase)"}
 FORM_SHORT = {"bare": "the registered form", "neutral_rel": "the second form (less the neutral push)"}
 
 
