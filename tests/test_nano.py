@@ -97,3 +97,22 @@ def test_the_stack_mark_needs_more_than_the_bar():
     assert out["A-trunk-3"]["U3"] == "THE STACK ADDS" and out["A-trunk-3"]["best_member"][0] == "a|A-trunk-3"
     C1["s|A-trunk-3"]["Q"]["alignment"] = 0.405
     assert CM.stack_marks({"C1": C1}, {"C1": C1b}, "s", ["a", "b"])["A-trunk-3"]["U3"] == "NOTHING ADDED"
+
+
+def test_the_relay_closes_every_token_but_the_first_on_the_appended_space():
+    from alephllm_diffusion.nano import relay as NR
+    raw, a_end = b"A red bus.", [1, 5, 9, 10]                 # 'A', ' red', ' bus', '.'
+    assert NR.closing_positions(a_end) == [6, 10, 11]           # in [DOC] + caption + ' '
+    assert NR.prefixes(raw, a_end) == [b"A red ", b"A red bus.", b"A red bus. "]
+    s = NR.states(torch.ones(4), torch.zeros(3, 4))
+    assert s.shape == (4, 4) and bool((s[0] == 1).all()) and bool((s[1:] == 0).all())
+
+
+def test_the_relay_map_recovers_a_planted_linear_map():
+    from alephllm_diffusion.nano import relay as NR
+    g = torch.Generator().manual_seed(0)
+    X = torch.randn(400, 8, generator=g, dtype=F64)
+    W = torch.randn(8, 5, generator=g, dtype=F64)
+    Y = X @ W + 3.0 + 0.01 * torch.randn(400, 5, generator=g, dtype=F64)
+    m = NR.fit(X, Y, torch.arange(400) // 4)
+    assert m["cv_r2"] > 0.99 and float((NR.apply(m, X[:10]).double() - Y[:10]).abs().max()) < 0.1
