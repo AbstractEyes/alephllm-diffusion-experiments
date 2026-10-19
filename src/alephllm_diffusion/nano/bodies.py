@@ -3,7 +3,7 @@
 A reader is (body, version): the body is one of the four nano v1.1 crafts, the version the diet's end (step 61,422), one of its three
 continuations (frames -fr, plain control -ct, carry -cf, each at 65,237), one of the later arms (notes -nt at 65,237; frames then carry
 -fr-cf and carry then notes -cf-nt at 69,052; the mixed phase -mx at 67,145; the caption phase -mx-cp and its control -mx-cpx at
-72,868; each read once it is final on the Hub), or "birth": the
+72,868, and its second form -mx-cp2 with its control -mx-cpx2 at 72,868; each read once it is final on the Hub), or "birth": the
 body's own untrained start (the same
 architecture and the same seed, nothing trained: the control that must fail). The body's architecture and seed come from the trainer's
 own table (geolip.nano_beatrix.nano_v1.ALL), never restated here, so a body means one thing everywhere.
@@ -26,7 +26,10 @@ VERSIONS = {"end": ("", 61422), "fr": ("-fr", 65237), "ct": ("-ct", 65237), "cf"
             "nt": ("-nt", 65237), "fr-cf": ("-fr-cf", 69052), "cf-nt": ("-cf-nt", 69052), "mx": ("-mx", 67145),
             # the caption phase from the mixed phase's end (captions with their attributes as framed records) and its
             # control (the same phase, every frame taken from another caption)
-            "mx-cp": ("-mx-cp", 72868), "mx-cpx": ("-mx-cpx", 72868)}
+            "mx-cp": ("-mx-cp", 72868), "mx-cpx": ("-mx-cpx", 72868),
+            # the caption phase again with the frame withheld in half the caption documents (the question answered from the
+            # caption alone) and its control (the frames and the questions' records taken from another caption)
+            "mx-cp2": ("-mx-cp2", 72868), "mx-cpx2": ("-mx-cpx2", 72868)}
 ORDER = ("end", "fr", "ct", "cf", "birth")
 
 
