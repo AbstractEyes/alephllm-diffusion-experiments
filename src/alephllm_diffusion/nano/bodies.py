@@ -8,11 +8,15 @@ body's own untrained start (the same
 architecture and the same seed, nothing trained: the control that must fail). The body's architecture and seed come from the trainer's
 own table (geolip.nano_beatrix.nano_v1.ALL), never restated here, so a body means one thing everywhere.
 
-Weights: AbstractPhil/alephllm-nano-castor-pollux <craft>/checkpoints/step_<step>.safetensors (public; read tokenless), loaded strictly
-in fp32 into geolip.alephllm's AlephLM built from geolip.nano_beatrix.bodies.craft_cfg at the crafts' context (4,096)."""
+Weights: AbstractPhil/alephllm-nano-castor-pollux <craft>/checkpoints/step_<step>.safetensors, or for the superseded arms (MOVED: the
+frames, control, carry and notes arms and their stacks) AbstractPhil/alephllm-nano-beatrix-training castor-pollux-v1.1/<craft>/... where
+they now live, byte for byte (both public; read tokenless), loaded strictly in fp32 into geolip.alephllm's AlephLM built from
+geolip.nano_beatrix.bodies.craft_cfg at the crafts' context (4,096)."""
 from __future__ import annotations
 
 REPO = "AbstractPhil/alephllm-nano-castor-pollux"
+TRAINING_REPO, MOVED_DIR = "AbstractPhil/alephllm-nano-beatrix-training", "castor-pollux-v1.1"
+MOVED = frozenset({"fr", "ct", "cf", "nt", "fr-cf", "cf-nt"})      # the superseded arms, kept in the training repo
 CTX = 4096
 BODIES = {"castor": "nano-castor-v1", "pollux-canon": "nano-pollux-canon-v1", "pollux-dual": "nano-pollux-dual-v1",
           "pollux-dual-canon": "nano-pollux-dual-canon-v1"}
@@ -32,6 +36,13 @@ def craft(body: str, version: str) -> tuple:
     return f"{BODIES[body]}.1{suffix}", step
 
 
+def location(body: str, version: str) -> tuple:
+    """(the repo, the path in it) of a trained version's checkpoint: the release repo, or the training repo for a moved arm."""
+    name, step = craft(body, version)
+    rel = f"{name}/checkpoints/step_{step:08d}.safetensors"
+    return (TRAINING_REPO, f"{MOVED_DIR}/{rel}") if version in MOVED else (REPO, rel)
+
+
 def spec(body: str) -> dict:
     """the trainer's own entry for the body's v1.1 craft: arm, seed, code, body text."""
     from geolip.nano_beatrix import nano_v1
@@ -46,8 +57,8 @@ def state(body: str, version: str, token=False) -> dict:
         return nano_v1.birth_state(s["arm"], s["seed"])
     from huggingface_hub import hf_hub_download
     from safetensors.torch import load_file
-    name, step = craft(body, version)
-    path = hf_hub_download(REPO, f"{name}/checkpoints/step_{step:08d}.safetensors", token=token)
+    repo, rel = location(body, version)
+    path = hf_hub_download(repo, rel, token=token)
     return {k: v.float().contiguous() for k, v in load_file(path).items()}
 
 
