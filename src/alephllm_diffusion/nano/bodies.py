@@ -31,10 +31,19 @@ VERSIONS = {"end": ("", 61422), "fr": ("-fr", 65237), "ct": ("-ct", 65237), "cf"
             # caption alone) and its control (the frames and the questions' records taken from another caption)
             "mx-cp2": ("-mx-cp2", 72868), "mx-cpx2": ("-mx-cpx2", 72868)}
 ORDER = ("end", "fr", "ct", "cf", "birth")
+# Pollux dual's v1.2 run: the same birth and recipe as v1.1, half of every phase's rows framed from the first step; one checkpoint
+# at each phase boundary of the diet (version "v12-<step>", body "pollux-dual" only), read like the versions above
+V12 = "nano-pollux-dual-v1.2"
+V12_STEPS = (1145, 20219, 22890, 25561, 29376, 33954, 38532, 42347, 45399, 50740, 53792, 57607, 61422)
+CRAFTS = {f"v12-{s}": (V12, s) for s in V12_STEPS}
 
 
 def craft(body: str, version: str) -> tuple:
     """(the craft's name on the Hub, its step) for a trained version."""
+    if version in CRAFTS:
+        if body != "pollux-dual":
+            raise KeyError(f"{version} is a pollux-dual craft, not {body}'s")
+        return CRAFTS[version]
     suffix, step = VERSIONS[version]
     return f"{BODIES[body]}.1{suffix}", step
 
