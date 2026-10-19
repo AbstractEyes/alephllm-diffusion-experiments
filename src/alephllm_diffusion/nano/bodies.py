@@ -2,7 +2,8 @@
 
 A reader is (body, version): the body is one of the four nano v1.1 crafts, the version the diet's end (step 61,422), one of its three
 continuations (frames -fr, plain control -ct, carry -cf, each at 65,237), one of the later arms (notes -nt at 65,237; frames then carry
--fr-cf and carry then notes -cf-nt at 69,052; the mixed phase -mx at 67,145; each read once it is final on the Hub), or "birth": the
+-fr-cf and carry then notes -cf-nt at 69,052; the mixed phase -mx at 67,145; the caption phase -mx-cp and its control -mx-cpx at
+72,868; each read once it is final on the Hub), or "birth": the
 body's own untrained start (the same
 architecture and the same seed, nothing trained: the control that must fail). The body's architecture and seed come from the trainer's
 own table (geolip.nano_beatrix.nano_v1.ALL), never restated here, so a body means one thing everywhere.
@@ -18,7 +19,10 @@ BODIES = {"castor": "nano-castor-v1", "pollux-canon": "nano-pollux-canon-v1", "p
 VERSIONS = {"end": ("", 61422), "fr": ("-fr", 65237), "ct": ("-ct", 65237), "cf": ("-cf", 65237),
             # the later arms (not every body has each one): notes from the diet's end, frames then carry, carry then notes,
             # and the mixed phase
-            "nt": ("-nt", 65237), "fr-cf": ("-fr-cf", 69052), "cf-nt": ("-cf-nt", 69052), "mx": ("-mx", 67145)}
+            "nt": ("-nt", 65237), "fr-cf": ("-fr-cf", 69052), "cf-nt": ("-cf-nt", 69052), "mx": ("-mx", 67145),
+            # the caption phase from the mixed phase's end (captions with their attributes as framed records) and its
+            # control (the same phase, every frame taken from another caption)
+            "mx-cp": ("-mx-cp", 72868), "mx-cpx": ("-mx-cpx", 72868)}
 ORDER = ("end", "fr", "ct", "cf", "birth")
 
 
